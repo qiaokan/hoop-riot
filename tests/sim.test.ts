@@ -372,4 +372,178 @@ describe('mechanics', () => {
     expect(down).toBe(false);
     expect(game.ball.holder).toBe(0);
   });
+
+  it('running into an opponent grabs them too', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 600; d1.z = 180;
+    run(game, 40, () => ({ 2: { mx: 1, sprint: true, grab: true } }));
+    expect(d1.state).toBe('grab');
+    expect(me.state).toBe('held');
+  });
+
+  it('pressing the action button at point-blank range grabs instead of punching', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 674; d1.z = 180; d1.facing = 1;
+    run(game, 6, (f) => ({ 2: { action: f === 0, grab: true } }));
+    expect(d1.state).toBe('grab');
+    expect(me.state).toBe('held');
+  });
+
+  it('walking into an opponent grabs them; the computer does not grab by accident', () => {
+    const a = scene();
+    a.me.x = 700; a.me.z = 180; a.d1.x = 660; a.d1.z = 180;
+    run(a.game, 30, () => ({ 2: { mx: 1, grab: true } }));
+    expect(a.d1.state).toBe('grab');
+    expect(a.me.state).toBe('held');
+    expect(a.game.ball.holder).toBe(0);
+
+    const b = scene();
+    b.me.x = 700; b.me.z = 180; b.d1.x = 660; b.d1.z = 180;
+    run(b.game, 30, () => ({ 2: { mx: 1 } }));
+    expect(b.me.state).not.toBe('held');
+  });
+
+  it('a grab allows two knee strikes, then throws the victim and frees the ball', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 660; d1.z = 180;
+    run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
+    const x0 = me.x;
+    let knees = 0, top = 0, down = false;
+    run(game, 150, (f) => ({ 2: { action: f % 14 === 0 } }), () => {
+      for (const e of game.drainEvents()) if (e.type === 'hit' && e.power === 2) knees++;
+      if (me.state === 'down') { down = true; top = Math.max(top, me.y); }
+      return false;
+    });
+    expect(knees).toBe(2);
+    expect(down).toBe(true);
+    expect(top).toBeGreaterThan(30);
+    expect(me.x).toBeGreaterThan(x0 + 60); // thrown forward, away from the grabber
+    expect(game.ball.holder).not.toBe(0);
+  });
+
+  it('back + action throws the victim behind the grabber', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 660; d1.z = 180;
+    run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
+    expect(me.state).toBe('held');
+    const gx = d1.x;
+    run(game, 90, (f) => ({ 2: { mx: -1, action: f === 2 } }));
+    expect(me.x).toBeLessThan(gx - 40);
+  });
+
+  it('a held player can wrench free with a dodge, staggering the grabber', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 660; d1.z = 180;
+    run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
+    expect(me.state).toBe('held');
+    let grabberStunned = false;
+    run(game, 10, (f) => ({ 0: { special: f === 1 } }), () => { grabberStunned ||= d1.state === 'stun'; return false; });
+    expect(me.state).not.toBe('held');
+    expect(grabberStunned).toBe(true);
+    expect(me.stamina).toBeLessThan(0.9);
+    expect(game.ball.holder).toBe(0);
+  });
+
+  it('the ball bounces off the backboard', () => {
+    const { game } = scene();
+    const b = game.ball;
+    b.state = 'loose'; b.holder = null;
+    b.x = attackHoopX(0) - 50; b.y = 190; b.z = HOOP.z; b.vx = 320; b.vy = 120; b.vz = 0;
+    let board = false;
+    run(game, 30, () => ({}), () => { for (const e of game.drainEvents()) if (e.type === 'board') board = true; return board; });
+    expect(board).toBe(true);
+    expect(b.vx).toBeLessThan(0);
+  });
+
+  it('mistimed shots meet the rim and backboard, and some still drop', () => {
+    let rim = 0, board = 0, made = 0, lucky = 0;
+    for (let seed = 1; seed <= 80; seed++) {
+      const { game, me } = scene(seed);
+      me.x = attackHoopX(0) - 220; me.z = HOOP.z + 40;
+      // Let go a little early: outside the sure-make window, but not wildly.
+      let release = false, flown = false;
+      run(game, 400, () => {
+        if (me.state === 'shoot' && me.vy <= 190) release = true;
+        return { 0: { shoot: !release } };
+      }, () => {
+        if (game.ball.state === 'shot') flown = true;
+        for (const e of game.drainEvents()) {
+          if (e.type === 'rim') rim++;
+          if (e.type === 'board') board++;
+          if (e.type === 'swish' && e.text !== 'SWISH!') lucky++;
+        }
+        return game.score[0] > 0 || (flown && (game.ball.state === 'loose' || game.ball.state === 'held'));
+      });
+      if (game.score[0] > 0) made++;
+    }
+    // eslint-disable-next-line no-console
+    console.log(`80 mistimed shots: ${made} made (${lucky} off rim or board), ${rim} rim hits, ${board} backboard hits`);
+    expect(rim).toBeGreaterThan(10);
+    expect(made).toBeGreaterThan(4);
+    expect(made).toBeLessThan(60);
+  });
+
+  it('a direction plus action throws at once: lifted overhead, hurled, spinning, slammed', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180; d1.x = 660; d1.z = 180;
+    run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
+    expect(me.state).toBe('held');
+    const x0 = me.x;
+    let knees = 0, liftTop = 0, spun = 0, slam3 = false, hurl = false, downFrames = 0, lastRot = 0;
+    run(game, 200, (f) => ({ 2: { mx: f < 3 ? 1 : 0, action: f === 1 } }), () => {
+      for (const e of game.drainEvents()) {
+        if (e.type === 'hit') knees++;
+        if (e.type === 'hurl') hurl = true;
+        if (e.type === 'slam' && e.power === 3) slam3 = true;
+      }
+      if (me.state === 'held') liftTop = Math.max(liftTop, me.y);
+      if (me.state === 'down') { downFrames++; spun += Math.abs(me.rot - lastRot); }
+      lastRot = me.rot;
+      return false;
+    });
+    expect(knees).toBe(0); // no knee strikes: straight to the throw
+    expect(liftTop).toBeGreaterThan(55); // carried up over the thrower's head first
+    expect(hurl).toBe(true);
+    expect(spun).toBeGreaterThan(Math.PI); // tumbles at least half a turn in the air
+    expect(slam3).toBe(true); // lands as a heavy slam
+    expect(me.x).toBeGreaterThan(x0 + 120);
+    expect(downFrames).toBeGreaterThan(100); // stays down longer than a normal knockdown
+    expect(game.ball.holder).not.toBe(0);
+  });
+
+  it('play does not stop for a basket: the ball is live and the other team can take it', () => {
+    const { game, me, mate, d1, d2 } = scene();
+    const hx = attackHoopX(0);
+    me.x = hx - 220; me.z = HOOP.z;
+    mate.x = 300; mate.z = 300;
+    d1.x = hx - 120; d1.z = HOOP.z + 20; // an opponent waiting under the hoop
+    d2.x = 200; d2.z = 60;
+    const mateStart = mate.x;
+    let release = false;
+    run(game, 400, () => {
+      if (me.state === 'shoot' && me.vy <= 0) release = true;
+      return { 0: { shoot: !release } };
+    }, () => game.score[0] > 0);
+    expect(game.score[0]).toBe(2);
+    expect(game.phase).toBe('play');
+    const clock = game.clock;
+    // The opponent under the hoop goes for the ball as it drops.
+    let took = false;
+    run(game, 240, () => ({ 2: { mx: Math.sign(game.ball.x - d1.x), mz: Math.sign(game.ball.z - d1.z) } }), () => { took ||= game.ball.holder === 2; return took; });
+    expect(took).toBe(true);
+    expect(game.phase).toBe('play');
+    expect(game.clock).toBeLessThan(clock); // the clock kept running
+    expect(mate.x).toBe(mateStart); // nobody was moved back to a starting position
+  });
+
+  it('the team that just scored has to wait a moment before touching the ball', () => {
+    const { game, me, d1, d2 } = scene();
+    const hx = attackHoopX(0);
+    me.x = hx - 100; me.z = HOOP.z;
+    d1.x = 200; d2.x = 200;
+    run(game, 200, (f) => ({ 0: { mx: 1, sprint: true, shoot: f === 6 } }), () => game.score[0] > 0);
+    expect(game.score[0]).toBe(2);
+    expect(me.pickupCd).toBeGreaterThan(0.5);
+    expect(game.players[2].pickupCd).toBe(0);
+  });
 });

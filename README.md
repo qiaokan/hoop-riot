@@ -30,11 +30,13 @@ One player:
 | Sprint | Shift | RB / RT |
 | Shoot / jump | J or Space: hold to jump, let go when the marker is in the green | A |
 | Pass (with ball) / punch combo (without) / throw (holding an item) | K | X |
+| Grab | Run or walk into an opponent, or press K while touching one (not while holding the ball) | Same |
+| In a grab | K: knee strike. Left or right + K: throw that way | X |
 | Running tackle | Sprint + K without the ball | RB + X |
 | Air kick | K while jumping | X in the air |
 | Dodge (cannot be hit) | L | B / Y |
 | Special | L when the RIOT meter is full | B / Y |
-| Switch player (on defense) | Q | LB |
+| Call for a pass | K when your teammate has the ball | X |
 | Pause · mute · music | P · M · N | Start |
 
 Two players on one keyboard:
@@ -46,16 +48,17 @@ Two players on one keyboard:
 | Shoot / jump | J | , (comma) |
 | Pass / hit / throw | K | . (period) |
 | Dodge / special | L | / (slash) |
-| Switch player (Versus) | Q | ' (quote) |
 
 With one gamepad connected in a two-player mode, the gamepad goes to Player 2. With two, each player gets one.
 
-**Who you control:** in one-player modes and in Versus, you always drive your team's ball carrier, and control follows your passes. On defense, press the switch key to take your other player. Control also moves on its own when your player is knocked down.
+**Who you control:** one player for the whole match. Player 1 is always Dash; in co-op Player 2 is Mo, and in Versus Player 2 is the other team's first player. Control never switches. When your computer teammate has the ball, press K to call for a pass, or jump at the rim to ask for a lob.
 
 ## Rules
 
 - 2-on-2, 2–5 minute game clock, 15-second shot clock. 3 points from beyond the arc. Tied at the buzzer means sudden death.
-- **Shooting:** a bar appears over your head during a jump shot. Let go while the marker is in the green zone and the shot always scores. The zone shrinks with distance and when a defender is close or in the air.
+- **Play never stops for a basket.** The ball drops out of the net and is live at once, so both teams fight for it. The team that just scored has to wait about a second before touching it, which gives the other side first chance.
+- **Shooting:** a bar appears over your head during a jump shot. Let go while the marker is in the green zone and the shot is aimed dead centre, so it always drops. The zone shrinks with distance and when a defender is close or in the air.
+- **Ball physics:** outside the green zone the aim scatters, and the rim and backboard decide the rest. The ball really bounces off the ring and the board, so shots can rattle in, bank in, or bounce out for a rebound. A shot can be rebounded as soon as it has touched the rim or board.
 - **Dunks:** sprint into the paint and press shoot. A dunk always scores unless you are hit out of the air.
 - **Alley-oop:** pass to a teammate who is jumping near the rim and they dunk it.
 
@@ -66,7 +69,10 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 - **Knockdowns are physical:** the body flies in an arc, can bounce once, slides, and bounces off the end fence. A flying body bowls over a teammate in its path.
 - A running tackle, an air kick or a thrown item knocks down at once. An air kick on an airborne player spikes them into the floor. A missed tackle leaves you sliding.
 - Hitting anyone who is in the air knocks them down.
-- **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out, at the cost of half your stamina.
+- **Grabs:** run or walk into an opponent and you grab them on contact. Pressing K while touching an opponent also grabs, instead of punching. You cannot grab while you hold the ball, and after a grab you must wait 5 seconds for the next (the HUD shows "GRAB READY"). A prompt over your head shows the buttons and the time left. A grab that is not used lets go after about a second. The computer only grabs when it decides to.
+- **In a grab:** K alone knees them (up to twice; the third press throws). Left or right + K throws them that way at once.
+- **Throws:** the thrower hoists the victim over their head and hurls them. The victim flies spinning, lands with a heavy slam and a bounce, drops the ball, stays down longer than from a normal knockdown, and bowls over a teammate in the way.
+- **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out for half your stamina; while held, for a fifth. Breaking a grab staggers the grabber.
 
 **The stage**
 - **Upper hoop:** every basket has a gold hoop above the normal one. A shot let go high in the air goes at it for a bonus point (3 from inside the arc, 4 from outside).

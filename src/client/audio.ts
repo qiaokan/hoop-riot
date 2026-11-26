@@ -112,8 +112,29 @@ export class Sfx {
         this.noise(0.05, 'highpass', 2000, 0.55);
         this.cheer(0.5);
         break;
+      case 'grab':
+        this.noise(0.09, 'lowpass', 450, 0.4);
+        this.tone(210, 0.08, 'triangle', 0.25, 130);
+        break;
+      case 'board':
+        // Ball off the backboard: a hollow knock.
+        this.tone(330, 0.12, 'triangle', 0.3, 210);
+        this.noise(0.05, 'bandpass', 520, 0.3, 2);
+        break;
+      case 'hurl':
+        // The heave of a throw.
+        this.noise(0.22, 'bandpass', 600, 0.3, 0.6);
+        this.tone(170, 0.2, 'sawtooth', 0.12, 420);
+        break;
       case 'slam':
-        // A body landing.
+        // A body landing. A thrown body lands with a deep double thud.
+        if (e.power === 3) {
+          this.tone(75, 0.34, 'sine', 0.9, 30);
+          this.tone(120, 0.14, 'triangle', 0.4, 50);
+          this.noise(0.26, 'lowpass', 380, 0.8);
+          this.noise(0.05, 'highpass', 1800, 0.4);
+          break;
+        }
         this.tone(e.power === 2 ? 85 : 110, e.power === 2 ? 0.2 : 0.12, 'sine', e.power === 2 ? 0.7 : 0.4, 34);
         this.noise(e.power === 2 ? 0.16 : 0.09, 'lowpass', 320, e.power === 2 ? 0.55 : 0.3);
         break;

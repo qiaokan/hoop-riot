@@ -31,6 +31,10 @@ export const DUNK_TIME = 0.55;
 export const SHOT_CLOCK = 15;
 export const DEFAULT_MATCH_SECONDS = 180;
 export const HAND_Y = 36;
+/** Ball radius, for collisions with the rim and backboard. */
+export const BALL_R = 9;
+/** Seconds before a player can grab again after a grab ends. */
+export const GRAB_COOLDOWN = 5;
 /** Rim height of the upper hoop above each basket. */
 export const HIGH_RIM_Y = 235;
 /** A shot or dunk started above this height goes at the upper hoop. */

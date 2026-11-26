@@ -19,7 +19,7 @@ interface Popup { text: string; x: number; y: number; z: number; life: number; c
 interface Banner { text: string; sub?: string; life: number; max: number; color: string }
 
 /** A player a person is controlling, and the tag drawn over their head. */
-export interface HumanView { pid: number; label: string; color: string }
+export interface HumanView { pid: number; label: string; color: string; /** Key names to show in prompts. */ action: string; dodge: string }
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
@@ -121,16 +121,41 @@ export class Renderer {
         this.shake = Math.max(this.shake, 10);
         break;
       case 'slam': {
-        // A body hitting the floor or the fence.
-        const hard = (e.power ?? 1) >= 2;
-        this.burst({ ...e, y: Math.max(3, e.y) }, hard ? 12 : 6, 'rgba(215,215,225,0.8)', 'dust', hard ? 150 : 90);
-        if (hard) this.ring({ ...e, y: Math.max(3, e.y) }, 'rgba(255,255,255,0.7)');
-        this.shake = Math.max(this.shake, hard ? 6 : 2.5);
+        // A body hitting the floor or the fence. A thrown body (power 3) lands hardest.
+        const pw = e.power ?? 1;
+        const at = { ...e, y: Math.max(3, e.y) };
+        this.burst(at, pw >= 3 ? 22 : pw === 2 ? 12 : 6, 'rgba(215,215,225,0.8)', 'dust', pw >= 3 ? 230 : pw === 2 ? 150 : 90);
+        if (pw >= 2) this.ring(at, 'rgba(255,255,255,0.7)');
+        if (pw >= 3) {
+          this.ring(at, '#ffe14a');
+          this.impact({ ...e, y: 18 }, '#ffffff', 50);
+          this.burst(at, 14, '#ffe14a', 'spark', 320);
+          this.flash = Math.max(this.flash, 0.22);
+        }
+        this.shake = Math.max(this.shake, pw >= 3 ? 14 : pw === 2 ? 6 : 2.5);
         break;
       }
+      case 'hurl':
+        // The moment a throw lets go.
+        this.burst(e, 10, '#ffffff', 'spark', 260);
+        this.popup(e.text ?? 'THROW!', { ...e, y: e.y + 30 }, '#ff8a2a', 22);
+        this.shake = Math.max(this.shake, 5);
+        break;
       case 'swish':
         this.netSway[net(high)] = 1;
         this.lastSwishHigh = high;
+        if (e.text) this.popup(e.text, { ...e, y: e.y + 10 }, e.power === 2 ? '#ffffff' : '#ffe14a', 15);
+        break;
+      case 'board':
+        // Ball off the backboard.
+        this.burst(e, 5, '#ffffff', 'spark', 110);
+        this.netSway[net(high)] = Math.max(this.netSway[net(high)], 0.3);
+        break;
+      case 'grab':
+        this.burst(e, 10, '#ffe14a', 'spark', 200);
+        this.ring({ ...e, y: 30 }, '#ffe14a');
+        this.popup('GRAB!', { ...e, y: e.y + 50 }, '#ffe14a', 24);
+        this.shake = Math.max(this.shake, 5);
         break;
       case 'rim':
         this.netSway[net(high)] = 0.5;
@@ -281,15 +306,19 @@ export class Renderer {
     switch (p.state) {
       case 'down': return { mood: 'dizzy', celebrate: false };
       case 'stun': return { mood: 'pain', celebrate: false };
-      case 'punch': case 'tackle': case 'airkick': return { mood: 'angry', celebrate: false };
+      case 'punch': case 'tackle': case 'airkick': case 'grab': case 'toss': return { mood: 'angry', celebrate: false };
+      case 'held': return { mood: 'pain', celebrate: false };
       case 'dunk': case 'hang': return { mood: 'happy', celebrate: false };
       case 'shoot': case 'spin': return { mood: 'focus', celebrate: false };
       default: break;
     }
     let side: TeamId | null = null;
     if (game.phase === 'end') side = game.winner;
-    else if (game.phase === 'score' && game.lastScorer !== null) side = game.players[game.lastScorer].team;
     if (side !== null) return p.team === side ? { mood: 'happy', celebrate: true } : { mood: 'sad', celebrate: false };
+    // Play goes on after a basket, so the scorers only get a grin for a moment.
+    if (game.lastScorer !== null && game.time - game.lastScoreTime < 1.2 && game.players[game.lastScorer].team === p.team) {
+      return { mood: 'happy', celebrate: false };
+    }
     if (Math.hypot(p.vx, p.vz) > 215) return { mood: 'effort', celebrate: false };
     return { mood: 'normal', celebrate: false };
   }
@@ -412,6 +441,29 @@ export class Renderer {
       ctx.fillRect(bx + pos * bw - 1.5, by - 3, 3, 15);
     }
 
+    // Prompts for a person in a grab: what the buttons do, and how long the hold lasts.
+    for (const hv of humans) {
+      const h = game.players[hv.pid];
+      if (h.state !== 'grab' && h.state !== 'held') continue;
+      const x = h.x - camX + (h.state === 'grab' ? h.facing * 12 : 0), y = sy(h.z, 0) - 172;
+      const lines = h.state === 'grab'
+        ? [h.knees < 2 ? `${hv.action}: knee (${h.knees}/2)` : `${hv.action}: THROW!`, `LEFT / RIGHT + ${hv.action}: THROW`]
+        : [`${hv.dodge}: break free`];
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 13px "Trebuchet MS", sans-serif';
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18;
+      ctx.fillStyle = 'rgba(12,8,28,0.88)';
+      roundRect(ctx, x - w / 2, y - 16, w, lines.length * 17 + 12, 7);
+      ctx.fill();
+      lines.forEach((l, i) => { ctx.fillStyle = i === 0 ? hv.color : '#ffffff'; ctx.fillText(l, x, y + i * 17); });
+      if (h.state === 'grab') {
+        // Time left before the hold lets go.
+        const total = 1.1 + h.knees * 0.3, left = Math.max(0, 1 - h.t / total);
+        ctx.fillStyle = hv.color;
+        ctx.fillRect(x - w / 2 + 5, y + lines.length * 17 - 9, (w - 10) * left, 3);
+      }
+    }
+
     this.drawParticles(camX);
     this.drawPopups(camX);
     ctx.restore();
@@ -498,11 +550,12 @@ export class Renderer {
     // Speed lines behind a Mega Slam or Blitz.
     for (const p of game.players) {
       const mega = p.state === 'dunk' && p.dunk?.kind === 'mega';
-      if (!mega && !(p.state === 'tackle' && p.blitz)) continue;
+      const flung = p.state === 'down' && p.thrown && p.y > 0;
+      if (!mega && !flung && !(p.state === 'tackle' && p.blitz)) continue;
       this.particles.push({
         x: p.x, y: p.y + 30 + this.rnd() * 40, z: p.z,
-        vx: -p.facing * 200, vy: 0, vz: 0,
-        life: 0, max: 0.25, color: mega ? '#ffe14a' : '#ff4fa3', size: 3, kind: 'spark', grav: 0,
+        vx: flung ? -p.vx * 0.5 : -p.facing * 200, vy: 0, vz: 0,
+        life: 0, max: 0.25, color: mega ? '#ffe14a' : flung ? '#ffffff' : '#ff4fa3', size: 3, kind: 'spark', grav: 0,
       });
     }
     for (const p of this.particles) {
@@ -629,7 +682,8 @@ export class Renderer {
       ctx.font = 'bold 9px "Trebuchet MS", sans-serif';
       ctx.textAlign = i === 0 ? 'left' : 'right';
       ctx.fillStyle = hv.color;
-      ctx.fillText(`${hv.label} · ${h.def.name.toUpperCase()} · STAMINA`, i === 0 ? bx : bx + 200, VIEW_H - 50);
+      const grab = h.grabCd > 0 ? `GRAB IN ${Math.ceil(h.grabCd)}s` : 'GRAB READY';
+      ctx.fillText(`${hv.label} · ${h.def.name.toUpperCase()} · STAMINA · ${grab}`, i === 0 ? bx : bx + 200, VIEW_H - 50);
     });
   }
 

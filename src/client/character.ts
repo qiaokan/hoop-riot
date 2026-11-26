@@ -233,27 +233,33 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       P.hipX = Math.sin(t * 70) * 1.5 * k;
       break;
     }
-    case 'down':
+    case 'down': {
       rate = 60;
-      if (t < 0.3) {
-        // Thrown backward, limbs flung out.
+      const upAt = p.downFor - 0.28;
+      if (p.thrown) {
+        // Thrown: tumbling through the air. The spin itself comes from the body's rotation.
+        P.armF = 2.4 + Math.sin(time * 20) * 0.5; P.armB = 2.7 - Math.sin(time * 20) * 0.5; P.elbowF = 0.2; P.elbowB = 0.2;
+        P.fFx = 7; P.fFy = 7; P.fBx = -6; P.fBy = 5; P.lean = -0.1;
+      } else if (t < 0.3) {
+        // Knocked backward, limbs flung out.
         const u = t / 0.3;
         P.rot = -(Math.PI / 2) * Math.min(1, u * 1.25); P.rotY = 10 + Math.sin(u * Math.PI) * 12;
         P.armF = -2.2; P.armB = -2.6; P.elbowF = 0.2; P.elbowB = 0.2;
         P.fFx = 8; P.fFy = 8; P.fBx = 2; P.fBy = 5;
-      } else if (t < 0.82) {
+      } else if (t < upAt) {
         // Flat on the back, with a small bounce on impact.
         P.rot = -Math.PI / 2; P.rotY = 9 + (t < 0.42 ? Math.sin(((t - 0.3) / 0.12) * Math.PI) * 4 : 0);
         P.armF = -2.5; P.elbowF = 0.2; P.armB = -1.2; P.elbowB = 0.4;
         P.fFx = 6; P.fFy = 3; P.fBx = -4;
       } else {
         // Pushing back up.
-        const u = clamp01((t - 0.82) / 0.28);
+        const u = clamp01((t - upAt) / 0.28);
         P.rot = -(Math.PI / 2) * (1 - u); P.rotY = 9 * (1 - u);
         P.hipH = HIP - 7 + 7 * u; P.lean = 0.5 * (1 - u); P.head = 0.3 * (1 - u);
         P.armF = 0.6; P.armB = 0.3; P.fFx = 7; P.fBx = -6;
       }
       break;
+    }
     case 'tackle':
       // Full-length dive; flatter once it has hit or missed and is sliding.
       rate = 45;
@@ -270,6 +276,43 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
     case 'spin':
       P.armF = 1.57; P.armB = -1.57; P.elbowF = 0; P.elbowB = 0; P.hipH = HIP - 3; P.fFx = 7; P.fBx = -7;
       break;
+    case 'grab':
+      // Both hands on the opponent's collar; a knee strike drives the front knee up into them.
+      rate = 45;
+      P.armF = 1.5; P.elbowF = 0.3; P.armB = 1.35; P.elbowB = 0.45; P.lean = 0.2; P.hipH = HIP - 1.5; P.fFx = 8; P.fBx = -8;
+      if (p.kneeT > 0) { P.fFx = 17; P.fFy = 17; P.lean = -0.16; P.hipX = 4; P.hop = 4; P.head = -0.1; P.armF = 1.2; P.armB = 1.1; }
+      break;
+    case 'held':
+      rate = 45;
+      if (p.y > 4) {
+        // Being swung through the air: limbs trailing.
+        P.armF = 2.6; P.elbowF = 0.2; P.armB = 2.9; P.elbowB = 0.2; P.fFx = 7; P.fFy = 6; P.fBx = -6; P.fBy = 4; P.lean = -0.1; P.head = -0.2;
+      } else {
+        // Hunched over in the hold, struggling; doubles up when kneed.
+        P.lean = 0.42; P.head = 0.3; P.hipH = HIP - 3; P.armF = 0.5; P.elbowF = 1.2; P.armB = -0.3; P.elbowB = 0.9;
+        P.fFx = 6; P.fBx = -7; P.hipX = Math.sin(time * 28 + p.id) * 1.4;
+        if (p.flinch > 0) { P.lean = 0.75; P.head = 0.55; P.hop = 9; P.hipH = HIP - 5; P.fFy = 4; P.fBy = 5; P.armF = 1.1; P.armB = 0.9; }
+      }
+      break;
+    case 'toss': {
+      // The throw: hoist the opponent overhead, then heave them away with the whole body.
+      rate = 50;
+      const fwd = p.tossDir === p.facing;
+      const T = fwd ? 0.3 : 0.26;
+      if (t < T * 0.65) {
+        // Lifting: knees bent, back arched, arms carrying the weight up and over.
+        P.armF = 2.9; P.elbowF = 0.15; P.armB = 2.75; P.elbowB = 0.2; P.lean = -0.3; P.hipH = HIP - 4; P.fFx = 9; P.fBx = -9; P.head = -0.25;
+      } else if (fwd) {
+        // Whipping forward: big step, arms driving through.
+        P.armF = 1.75; P.elbowF = 0; P.armB = 1.6; P.elbowB = 0.1; P.lean = 0.5; P.hipH = HIP - 4; P.hipX = 7; P.fFx = 15; P.fBx = -10; P.head = 0.1;
+        if (t > T) { P.armF = 1.3; P.armB = 1.1; P.lean = 0.55; }
+      } else {
+        // Throwing behind: arching all the way back, arms going over the head.
+        P.armF = 3.6; P.elbowF = 0.1; P.armB = 3.5; P.elbowB = 0.1; P.lean = -0.6; P.hipH = HIP - 3; P.hipX = -5; P.fFx = 8; P.fBx = -9; P.head = -0.45;
+        if (t > T) { P.lean = -0.3; P.armF = 3.2; P.armB = 3.1; }
+      }
+      break;
+    }
     case 'pass':
       // Chest pass: both arms thrust forward, a step into it.
       rate = 45;
@@ -372,6 +415,12 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
   const skin = d.skin;
   const dir = Math.sign(flip) || 1;
   ctx.save();
+  // Swung in a throw or spinning through the air: turn the whole figure about its middle.
+  if (p.rot && (p.state === 'held' || p.state === 'down')) {
+    ctx.translate(0, -44 * S);
+    ctx.rotate(p.rot);
+    ctx.translate(0, 44 * S);
+  }
   ctx.scale(flip * S * P.sx, S * P.sy);
   if (P.rot || P.rotY) { ctx.translate(0, -P.rotY); ctx.rotate(P.rot); }
   if (p.invuln > 0 && Math.floor(time * 20) % 2 === 0) ctx.globalAlpha *= 0.5;

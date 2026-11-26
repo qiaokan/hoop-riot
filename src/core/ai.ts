@@ -18,14 +18,16 @@ export interface AIParams {
   dodge: number;
   /** Chance to follow a landed punch with the next strike of the combo. */
   combo: number;
+  /** Chance to go for a grab when close to the ball carrier. */
+  grab: number;
   /** Shot release timing error (seconds). */
   jitter: number;
 }
 
 export const AI_PARAMS: Record<Difficulty, AIParams> = {
-  easy: { react: 0.34, aggression: 0.1, blockSkill: 0.2, passIQ: 0.35, tackle: 0.05, dodge: 0.1, combo: 0.15, jitter: 0.17 },
-  normal: { react: 0.22, aggression: 0.2, blockSkill: 0.4, passIQ: 0.55, tackle: 0.11, dodge: 0.3, combo: 0.35, jitter: 0.11 },
-  hard: { react: 0.13, aggression: 0.32, blockSkill: 0.6, passIQ: 0.7, tackle: 0.2, dodge: 0.5, combo: 0.6, jitter: 0.07 },
+  easy: { react: 0.34, aggression: 0.1, blockSkill: 0.2, passIQ: 0.35, tackle: 0.05, dodge: 0.1, combo: 0.15, grab: 0.03, jitter: 0.17 },
+  normal: { react: 0.22, aggression: 0.2, blockSkill: 0.4, passIQ: 0.55, tackle: 0.11, dodge: 0.3, combo: 0.35, grab: 0.07, jitter: 0.11 },
+  hard: { react: 0.13, aggression: 0.32, blockSkill: 0.6, passIQ: 0.7, tackle: 0.2, dodge: 0.5, combo: 0.6, grab: 0.13, jitter: 0.07 },
 };
 
 /** Multiplier on the size of the sure-make release window. */
@@ -57,13 +59,15 @@ interface Brain {
   /** Which combo strike the follow-up decision was last made for, and what it was. */
   comboSeen: number;
   comboGo: boolean;
+  /** Walking into the ball carrier to grab them until this time. */
+  grabUntil: number;
 }
 
 const newBrain = (): Brain => ({
   next: 0, tx: 0, tz: 0, sprint: false, action: false, special: false, jump: false,
   tackle: false, ttx: 0, ttz: 0,
   startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
-  padUntil: -9, padX: 0, padZ: 0, comboSeen: -1, comboGo: false,
+  padUntil: -9, padX: 0, padZ: 0, comboSeen: -1, comboGo: false, grabUntil: -9,
 });
 
 export class AIController {
@@ -94,6 +98,16 @@ export class AIController {
 
     // Reflexes that cannot wait for the next decision tick.
     if (g.phase === 'play') {
+      // Holding someone: two knees, then the throw.
+      if (p.state === 'grab') {
+        out.action = p.t > 0.22 && Math.floor(now * 7) % 2 === 0;
+        return out;
+      }
+      // Being held: sometimes burn stamina to wrench free.
+      if (p.state === 'held') {
+        if (p.stamina >= 0.2 && this.rng() < 0.008 + P.dodge * 0.06) out.special = true;
+        return out;
+      }
       // Landed a punch: decide once per strike whether to throw the next one.
       if (p.state === 'punch' && p.punchHit && p.combo < 2) {
         if (b.comboSeen !== p.combo) { b.comboSeen = p.combo; b.comboGo = this.rng() < P.combo; }
@@ -191,6 +205,8 @@ export class AIController {
       out.mz = (dz / d) * s;
     }
     out.sprint = b.sprint;
+    out.grab = now < b.grabUntil;
+    if (out.grab) out.sprint = false;
     return out;
   }
 
@@ -204,7 +220,10 @@ export class AIController {
     if (holder && holder.id === p.id) this.withBall(p, b);
     else if (ball.state === 'held' && holder && holder.team === p.team) this.offBall(p, b, holder);
     else if (ball.state === 'held' && holder) this.defend(p, b, holder);
-    else if (ball.state === 'shot') this.rebound(p, b);
+    else if (ball.state === 'shot') {
+      // Once the ball is off the rim it goes wherever the bounce sends it: chase it.
+      if (ball.shot?.touched) this.looseBall(p, b); else this.rebound(p, b);
+    }
     else if (ball.state === 'pass') this.chasePass(p, b);
     else this.looseBall(p, b);
   }
@@ -238,6 +257,21 @@ export class AIController {
 
     // Already committed to running over a launch pad.
     if (g.time < b.padUntil) { b.tx = b.padX; b.tz = b.padZ; b.sprint = true; return; }
+
+    // A defender closing in with free hands is coming to grab: slip past them or move the ball.
+    if (opp && nd < 100 && opp.state === 'move') {
+      const closing = ((opp.vx - p.vx) * (p.x - opp.x) + (opp.vz - p.vz) * (p.z - opp.z)) / (nd || 1);
+      if (closing > 60 && this.rng() < 0.3 + P.dodge) {
+        // Best answer is to move the ball; otherwise dodge past on the open side.
+        if (g.canAct(mate) && this.laneClear(p, mate) && this.rng() < 0.3 + P.passIQ * 0.6) { b.action = true; return; }
+        if (!full && p.stamina >= 0.3 && this.rng() < 0.6) {
+          b.tx = opp.x + (opp.x - p.x);
+          b.tz = p.z + (p.z > opp.z ? 50 : -50);
+          b.special = true;
+          return;
+        }
+      }
+    }
 
     // Teammate (possibly the human) asked for the ball.
     if (g.passCall[p.team] > 0 && g.canAct(mate) && this.rng() < 0.9) { b.action = true; return; }
@@ -286,7 +320,8 @@ export class AIController {
     const dodge = opp ? (opp.z > p.z ? -1 : 1) : 0;
     b.tx = hx - dir * (d < 260 ? 60 : 120);
     b.tz = HOOP.z + dodge * (nd < 90 ? 80 : 30);
-    b.sprint = p.stamina > 0.35 && (nd > 60 || this.rng() < 0.3);
+    // Sprint when there is room, and also to get away from someone close: a sprinter cannot be grabbed.
+    b.sprint = p.stamina > 0.35 && (nd > 60 || this.rng() < 0.3) || (nd < 70 && p.stamina > 0.15);
 
     // Crowded: dodge through the defender along the drive line.
     if (nd < 46 && !full && p.stamina > 0.4 && this.rng() < P.dodge) b.special = true;
@@ -353,6 +388,9 @@ export class AIController {
       b.tx = holder.x + (vx / vl) * 34;
       b.tz = holder.z + (vz / vl) * 34;
       b.sprint = myD > 90 && p.stamina > 0.3;
+      // Sometimes go for a grab: walk straight into the ball carrier.
+      if (g.time >= b.grabUntil && myD < 75 && holder.state === 'move' && p.grabCd <= 0 && this.rng() < P.grab) b.grabUntil = g.time + 0.8;
+      if (g.time < b.grabUntil) { b.tx = holder.x; b.tz = holder.z; b.sprint = false; return; }
       const inReach = myD < 48 && Math.abs(holder.z - p.z) < 22;
       if (holder.state === 'dunk' && myD < 90 && this.rng() < P.aggression + 0.2) {
         b.face = holder.x > p.x ? 1 : -1; b.action = true;

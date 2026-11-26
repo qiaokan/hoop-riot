@@ -17,7 +17,7 @@ interface Move {
 }
 
 const reset = (p: Player) => {
-  p.state = 'move'; p.t = 0; p.y = 0; p.vx = 0; p.vy = 0; p.vz = 0; p.released = false; p.punchHit = false; p.launched = false; p.dunk = undefined; p.combo = 0;
+  p.state = 'move'; p.t = 0; p.y = 0; p.vx = 0; p.vy = 0; p.vz = 0; p.released = false; p.punchHit = false; p.launched = false; p.dunk = undefined; p.combo = 0; p.kneeT = 0;
 };
 
 const MOVES: Move[] = [
@@ -97,6 +97,15 @@ const MOVES: Move[] = [
     },
   },
   { name: 'Sulking after a basket', len: 4, set: () => 'sad' },
+  {
+    name: 'Grab, knee strike, throw', len: 2,
+    set: (p, t) => {
+      if (t < 1.1) { p.state = 'grab'; p.t = t; p.kneeT = (t > 0.4 && t < 0.62) || (t > 0.75 && t < 0.97) ? 0.1 : 0; return 'angry'; }
+      if (t < 1.7) { p.state = 'toss'; p.tossDir = 1; p.t = t - 1.1; return 'angry'; }
+      return 'normal';
+    },
+  },
+  { name: 'Held in a grab', len: 4, set: (p) => { p.state = 'held'; return 'pain'; } },
 ];
 
 const SCALE = 1.25, ROW = 215, W = 720;

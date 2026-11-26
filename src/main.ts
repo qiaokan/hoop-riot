@@ -1,6 +1,6 @@
 import { AIController, AI_PARAMS, ACCURACY, AIParams } from './core/ai';
 import { DT, TeamId } from './core/constants';
-import { Game, Intent, distXZ } from './core/game';
+import { Game } from './core/game';
 import { COURTS, CourtId, HOME_TEAM, OPPONENTS, UPGRADES, Upgrade, applyUpgrades } from './core/teams';
 import { Sfx } from './client/audio';
 import { Input } from './client/input';
@@ -18,14 +18,11 @@ const MODES: { id: Mode; name: string; blurb: string }[] = [
   { id: 'versus', name: '2P VERSUS', blurb: 'Player against player. Each gets a computer teammate.' },
 ];
 
-/** A person at the controls. `pid` is the player they are driving right now. */
+/** A person at the controls. Each person drives one fixed player for the whole match. */
 interface Human {
   slot: 0 | 1;
   team: TeamId;
   pid: number;
-  /** Control follows the ball and can be switched by hand (off in co-op, where each person keeps one player). */
-  switching: boolean;
-  swap: boolean;
   label: string;
   color: string;
 }
@@ -37,6 +34,8 @@ const AUTOPLAY = params.get('autoplay') === '1';
 const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1));
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
+/** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
+const VERSION = 'build 12 · throws, no stop after a basket';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -72,7 +71,6 @@ let game: Game;
 let ai: AIController;
 let humans: Human[] = [];
 let solo = true;
-let lastHolderTeam: TeamId | null = null;
 let seed = Number(params.get('seed') ?? 0) || Math.floor(Math.random() * 1e9);
 
 /** Which opponent the next match is against. */
@@ -94,14 +92,13 @@ function newGame(kind: Mode | 'attract', opp: number, seconds: number) {
   const p = new Map<number, AIParams>();
   for (const pl of game.players) p.set(pl.id, pl.team === 0 || kind === 'versus' ? AI_PARAMS.normal : AI_PARAMS[o.difficulty]);
   ai = new AIController(game, p, seed);
-  const h = (slot: 0 | 1, team: TeamId, pid: number, switching: boolean): Human =>
-    ({ slot, team, pid, switching, swap: false, label: slot === 0 ? 'P1' : 'P2', color: slot === 0 ? P1_COLOR : P2_COLOR });
+  const h = (slot: 0 | 1, team: TeamId, pid: number): Human =>
+    ({ slot, team, pid, label: slot === 0 ? 'P1' : 'P2', color: slot === 0 ? P1_COLOR : P2_COLOR });
   if (kind === 'attract' || AUTOPLAY) humans = [];
-  else if (kind === 'coop') humans = [h(0, 0, 0, false), h(1, 0, 1, false)];
-  else if (kind === 'versus') humans = [h(0, 0, 0, true), h(1, 1, 2, true)];
-  else humans = [h(0, 0, 0, true)];
+  else if (kind === 'coop') humans = [h(0, 0, 0), h(1, 0, 1)];
+  else if (kind === 'versus') humans = [h(0, 0, 0), h(1, 1, 2)];
+  else humans = [h(0, 0, 0)];
   solo = humans.length < 2;
-  lastHolderTeam = null;
   renderer.setCourt(court);
   renderer.reset();
   input.clearTaps();
@@ -146,38 +143,9 @@ if (AUTOPLAY) { mode = 'quick'; goCard(); }
 
 // ------------------------------------------------------------------ simulation
 
-/** Hand a person a different player. Buttons already held do not fire again on the new player. */
-function setControl(h: Human, pid: number, held: Intent) {
-  h.pid = pid;
-  const p = game.players[pid];
-  p.prev.shoot = held.shoot;
-  p.prev.action = held.action;
-  p.prev.special = held.special;
-}
-
 function stepSim() {
-  const held = humans.map((h) => input.intent(h.slot, solo));
-  const holder = game.holder();
-  const holderTeam = holder ? holder.team : null;
-  humans.forEach((h, i) => {
-    if (!h.switching) { h.swap = false; return; }
-    const cur = game.players[h.pid];
-    const mate = game.teammate(cur);
-    const pass = game.ball.pass;
-    let target = h.pid;
-    if (holder && holder.team === h.team) target = holder.id; // you always drive your ball carrier
-    else if (game.ball.state === 'pass' && pass && game.players[pass.to].team === h.team) target = pass.to;
-    else if (h.swap) target = mate.id;
-    else if (cur.state === 'down' && game.canAct(mate)) target = mate.id;
-    else if (holder && holderTeam !== lastHolderTeam) {
-      // The other team just got the ball: take whichever of your players is clearly closer to it.
-      if (game.canAct(mate) && distXZ(mate.x, mate.z, holder.x, holder.z) + 40 < distXZ(cur.x, cur.z, holder.x, holder.z)) target = mate.id;
-    }
-    h.swap = false;
-    if (target !== h.pid) setControl(h, target, held[i]);
-  });
-  lastHolderTeam = holderTeam;
-
+  // People always grab when they push into an opponent; the computer only when it means to.
+  const held = humans.map((h) => ({ ...input.intent(h.slot, solo), grab: true }));
   const byPid = new Map(humans.map((h, i) => [h.pid, held[i]]));
   game.step(game.players.map((p) => byPid.get(p.id) ?? ai.intent(p)));
   for (const e of game.drainEvents()) {
@@ -272,7 +240,6 @@ function frame(now: number) {
   last = now;
   input.poll();
   handleMenu();
-  for (const h of humans) if (input.takeSwap(h.slot, solo)) h.swap = true;
 
   if (scene === 'match' || scene === 'title') {
     acc += dt * SPEED * (scene === 'match' ? renderer.timeScale() : 1);
@@ -288,7 +255,10 @@ function frame(now: number) {
   }
 
   const dim = { title: 0.45, card: 0.7, match: 0, paused: 0.6, results: 0.68, upgrade: 0.78, champion: 0.6 }[scene];
-  const views = scene === 'title' ? [] : humans.map((h) => ({ pid: h.pid, label: h.label, color: h.color }));
+  const views = scene === 'title' ? [] : humans.map((h) => ({
+    pid: h.pid, label: h.label, color: h.color,
+    action: solo || h.slot === 0 ? 'K' : '.', dodge: solo || h.slot === 0 ? 'L' : '/',
+  }));
   renderer.render(game, dt, views, { hud: scene === 'match' || scene === 'paused', dim });
   const ctx = renderer.ctx;
   const t = now / 1000;
@@ -363,30 +333,32 @@ function drawTitle(ctx: CanvasRenderingContext2D, t: number) {
     : `${m.blurb} ${court.name}: ${court.feature.toLowerCase()}.`;
   text(ctx, info, VIEW_W / 2, by + 16 + rows.length * 36 + 22, `italic 14px ${FONT}`, '#ffffff', 'center', 4);
 
-  drawControls(ctx, 356, mode === 'coop' || mode === 'versus');
+  drawControls(ctx, 350, mode === 'coop' || mode === 'versus');
+  text(ctx, VERSION, VIEW_W - 10, 16, `11px ${FONT}`, '#cfd3e6', 'right', 3);
 }
 
 /** Controls reference: one person, or two people sharing the keyboard. */
 function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
   const cx = VIEW_W / 2;
-  panel(ctx, cx - 380, y, 760, 132, 0.82);
+  panel(ctx, cx - 380, y, 760, 148, 0.82);
   if (!twoP) {
     const lines = [
       ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
       ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K (tap 3 times: combo)'],
       ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K in the air'],
       ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
-      ['SWITCH PLAYER', 'Q (on defense)', 'THROW ITEM', 'K (walk over it first)'],
+      ['CALL FOR PASS', 'K when your teammate has the ball', 'THROW ITEM', 'K (walk over it first)'],
+      ['GRAB', 'Run into an opponent, or K when touching', 'IN A GRAB', 'K knee · direction + K throw'],
     ];
     lines.forEach((l, i) => {
-      const yy = y + 26 + i * 23;
+      const yy = y + 24 + i * 22.5;
       text(ctx, l[0], cx - 362, yy, `bold 13px ${FONT}`, '#ffe14a', 'left');
       text(ctx, l[1], cx - 232, yy, `13px ${FONT}`, '#ffffff', 'left');
       text(ctx, l[2], cx + 100, yy, `bold 13px ${FONT}`, '#ffe14a', 'left');
       text(ctx, l[3], cx + 215, yy, `13px ${FONT}`, '#ffffff', 'left');
     });
-    text(ctx, 'P pause · M mute · N music · Gamepad: stick, A shoot, X pass / hit, B dodge / special, RB sprint, LB switch',
-      cx, y + 150, `12px ${FONT}`, '#cfd3e6', 'center', 3);
+    text(ctx, 'P pause · M mute · N music · Gamepad: stick, A shoot, X pass / hit, B dodge / special, RB sprint',
+      cx, y + 164, `12px ${FONT}`, '#cfd3e6', 'center', 3);
   } else {
     const rows = [
       ['', 'PLAYER 1', 'PLAYER 2'],
@@ -395,17 +367,17 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
       ['SHOOT / JUMP', 'J', ',  (comma)'],
       ['PASS / HIT / THROW', 'K', '.  (period)'],
       ['DODGE / SPECIAL', 'L', '/  (slash)'],
-      ['SWITCH PLAYER', 'Q', '\'  (quote)'],
+      ['GRAB', 'Run into an opponent. Pass key: knee. Direction + pass key: throw', ''],
     ];
     rows.forEach((r, i) => {
-      const yy = y + 21 + i * 17.5;
+      const yy = y + 20 + i * 17.2;
       const head = i === 0;
       text(ctx, r[0], cx - 362, yy, `bold 12.5px ${FONT}`, '#cfd3e6', 'left');
       text(ctx, r[1], cx - 110, yy, `${head ? 'bold ' : ''}12.5px ${FONT}`, head ? P1_COLOR : '#ffffff', 'left');
       text(ctx, r[2], cx + 130, yy, `${head ? 'bold ' : ''}12.5px ${FONT}`, head ? P2_COLOR : '#ffffff', 'left');
     });
     text(ctx, 'Tackle: sprint + pass key · Air kick: pass key in the air · With one gamepad, it goes to Player 2',
-      cx, y + 150, `12px ${FONT}`, '#cfd3e6', 'center', 3);
+      cx, y + 164, `12px ${FONT}`, '#cfd3e6', 'center', 3);
   }
 }
 
@@ -434,15 +406,16 @@ function drawCard(ctx: CanvasRenderingContext2D, t: number) {
 function drawPause(ctx: CanvasRenderingContext2D) {
   text(ctx, 'PAUSED', VIEW_W / 2, 120, `italic 900 64px ${FONT}`, '#ffe14a', 'center', 10);
   text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 156, `bold 16px ${FONT}`, '#ffffff', 'center', 4);
-  drawControls(ctx, 186, !solo);
+  drawControls(ctx, 172, !solo);
   const tips = [
     'Tap K three times: jab, cross, then a finisher that launches them and frees the ball. A miss cannot be chained.',
-    'Caught in a combo? Press L to dodge out. It costs half your stamina.',
+    'Run into an opponent to grab them (not while you hold the ball). K knees; left or right + K throws that way.',
+    'Caught in a combo or a grab? Press L to break out (costs stamina). After a grab, wait 5 seconds for the next.',
     'Yellow pads launch you. In the air: shoot near the rim for a 3-point sky dunk, or hold and release a shot.',
     'Shots from high in the air go in the gold upper hoop for a bonus point.',
     'Pass when your teammate jumps at the rim for an alley-oop.',
   ];
-  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 364 + i * 19, `13px ${FONT}`, '#cfd3e6', 'center', 3));
+  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 386 + i * 18, `13px ${FONT}`, '#cfd3e6', 'center', 3));
 }
 
 function drawResults(ctx: CanvasRenderingContext2D) {
