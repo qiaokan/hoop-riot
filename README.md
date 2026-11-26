@@ -174,7 +174,7 @@ Everything on the court is stepped by the same fixed-step simulation, and each r
   - `teams.ts`: teams, courts and upgrades.
 - `src/client/`:
   - `render.ts`: Canvas 2D renderer: camera, zoom and slow motion, particles, HUD.
-  - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash). Feet and hips ease straight to it; arms, lean and head ride springs, so they overshoot and settle. Setting off and stopping throw the head and chest back and forward. A knocked-down body goes limp: its arms and legs are pendulums swung by the tumble and stopped by the floor. Also faces, outlines and the hit flash.
+  - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash). Feet and hips ease straight to it; arms, lean and head ride springs, so they overshoot and settle. Setting off and stopping throw the head and chest back and forward. A knocked-down body goes limp: its arms and legs are pendulums swung by the tumble and stopped by the floor. Each player has their own build, worked out from their stats (long legs for jumpers and sprinters, broad shoulders and thick limbs for strong players, a thick middle for heavy ones). Hands are open, fists, grips or pointing depending on the move. Shorts, jersey tail, hair and headband ends trail behind the motion on springs. Fourteen faces are tied to what the player is doing. The fastest moves leave afterimages. Everything is lit from the front.
   - `net.ts`: the nets, as small cloths the ball pushes through.
   - `sprites.ts`: ball, hoops, pads.
   - `toysprites.ts`: items, vehicles, the car, dogs, wrecking ball, bumpers and saucer.
@@ -187,6 +187,13 @@ Everything on the court is stepped by the same fixed-step simulation, and each r
 - `tests/physics.test.ts`: ball spin and friction, rolling, body mass and tumbling, loose items.
 - `tests/grab.test.ts`: what a person chasing the ball carrier gets out of grabs, and the ways out of one.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
+
+## Dev pages
+
+Neither is part of the game build.
+
+- `lineup.html`: a still contact sheet of the characters, the previous drawing code (a snapshot in `src/dev/prev_character.ts`) on the upper row of each pair and the current code below. `?from=4&n=2` picks the moves, `?who=1` the player, `?faces=1` shows every face, `?px=1` shows it at full size.
+- `sheet.html`: the older animated comparison against the very first sprites.
 
 ## Balance meter
 

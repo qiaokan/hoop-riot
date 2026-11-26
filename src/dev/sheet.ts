@@ -16,11 +16,11 @@ interface Move {
   set: (p: Player, t: number) => Mood;
 }
 
-const reset = (p: Player) => {
+export const reset = (p: Player) => {
   p.state = 'move'; p.t = 0; p.y = 0; p.vx = 0; p.vy = 0; p.vz = 0; p.released = false; p.punchHit = false; p.launched = false; p.dunk = undefined; p.combo = 0; p.kneeT = 0;
 };
 
-const MOVES: Move[] = [
+export const MOVES: Move[] = [
   { name: 'Sprint', len: 4, set: (p, t) => { p.vx = 254; p.anim = 254 * t; return 'normal'; } },
   { name: 'Run with the ball', len: 4, ball: true, set: (p, t) => { p.vx = 163; p.anim = 163 * t; return 'normal'; } },
   { name: 'Ready stance', len: 4, set: () => 'normal' },
@@ -108,6 +108,9 @@ const MOVES: Move[] = [
   { name: 'Held in a grab', len: 4, set: (p) => { p.state = 'held'; return 'pain'; } },
 ];
 
+if (document.getElementById('sheet')) run();
+
+function run() {
 const SCALE = 1.25, ROW = 215, W = 720;
 // ?at=0.5 freezes every move halfway through its loop (for inspecting single poses).
 const AT = new URLSearchParams(location.search).get('at');
@@ -157,7 +160,7 @@ function frame(now: number) {
       if (isNew) {
         drawNew(ctx, p, team, x, time, { hasBall, mood, celebrate: !!m.celebrate, dt, ballH: hasBall && p.state === 'move' ? ballH : 36, gazeX: 100, gazeY: 0, carrying: false });
       } else {
-        drawOld(ctx, p, team, x, time, { hasBall, mood: mood === 'effort' ? 'focus' : mood, celebrate: !!m.celebrate });
+        drawOld(ctx, p, team, x, time, { hasBall, mood: (mood === 'effort' ? 'focus' : mood) as never, celebrate: !!m.celebrate });
       }
       if (hasBall) {
         // Previous version: ball at the fixed offset the game used. Current: at the hand.
@@ -179,3 +182,4 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+}

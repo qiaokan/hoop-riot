@@ -408,11 +408,17 @@ export class Renderer {
     switch (p.state) {
       case 'down': return { mood: 'dizzy', celebrate: false };
       case 'stun': return { mood: 'pain', celebrate: false };
-      case 'punch': case 'tackle': case 'airkick': case 'grab': case 'toss': case 'pound': case 'spray': return { mood: 'angry', celebrate: false };
-      case 'held': case 'beam': return { mood: 'pain', celebrate: false };
-      case 'ride': return { mood: Math.hypot(p.vx, p.vz) > 150 ? 'effort' : 'happy', celebrate: false };
-      case 'dunk': case 'hang': return { mood: 'happy', celebrate: false };
-      case 'shoot': case 'spin': return { mood: 'focus', celebrate: false };
+      case 'punch': case 'tackle': case 'airkick': case 'toss': case 'pound': return { mood: 'grit', celebrate: false };
+      case 'grab': return { mood: 'angry', celebrate: false };
+      case 'spray': return { mood: 'shout', celebrate: false };
+      case 'held': return { mood: p.flinch > 0 ? 'pain' : 'shock', celebrate: false };
+      case 'beam': return { mood: 'shock', celebrate: false };
+      case 'ride': return { mood: Math.hypot(p.vx, p.vz) > 150 ? 'shout' : 'happy', celebrate: false };
+      case 'dunk': return { mood: 'shout', celebrate: false };
+      case 'hang': return { mood: 'smug', celebrate: false };
+      case 'shoot': return { mood: p.released ? 'focus' : 'aim', celebrate: false };
+      case 'spin': return { mood: 'focus', celebrate: false };
+      case 'jump': if (p.launched) return { mood: 'shock', celebrate: false }; break;
       default: break;
     }
     let side: TeamId | null = null;
@@ -422,6 +428,7 @@ export class Renderer {
     if (game.lastScorer !== null && game.time - game.lastScoreTime < 1.2 && game.players[game.lastScorer].team === p.team) {
       return { mood: 'happy', celebrate: false };
     }
+    if (p.stamina < 0.2) return { mood: 'tired', celebrate: false };
     if (Math.hypot(p.vx, p.vz) > 215) return { mood: 'effort', celebrate: false };
     return { mood: 'normal', celebrate: false };
   }

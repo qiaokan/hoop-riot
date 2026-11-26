@@ -7,7 +7,8 @@ import { sy } from './view';
 // how much it squashes. Each game state produces a target pose with wind-up, action and recovery
 // phases, and the drawn pose eases toward that target every frame, so moves flow into each other.
 
-export type Mood = 'normal' | 'angry' | 'pain' | 'dizzy' | 'happy' | 'sad' | 'focus' | 'effort';
+export type Mood = 'normal' | 'angry' | 'pain' | 'dizzy' | 'happy' | 'sad' | 'focus' | 'effort'
+  | 'shout' | 'grit' | 'shock' | 'smug' | 'tired' | 'aim';
 
 export interface PlayerLook {
   hasBall: boolean;
@@ -68,6 +69,11 @@ interface Anim {
   pvx: number; pvy: number;
   /** How far the head and torso are thrown back or forward by that acceleration (a spring). */
   sway: number; swayV: number;
+  /** Cloth and hair: how far they trail behind the motion (springs), and how far the hems fly up in a fall. */
+  cloth: number; clothV: number; hair: number; hairV: number; flare: number;
+  /** The last few drawn poses, for the afterimages behind a fast move. */
+  ghosts: { P: Pose; x: number; y: number; flip: number; turn: number }[];
+  tick: number;
 }
 
 /**
@@ -167,12 +173,67 @@ function ragPose(r: Rag, p: Player, P: Pose) {
   P.head = clampN(-f * (p.y > 0.5 ? p.spinRate : 0) * 0.045, 0.5);
 }
 
-function shade(hex: string, k: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.min(255, Math.max(0, Math.round(((n >> 16) & 255) * k)));
-  const g = Math.min(255, Math.max(0, Math.round(((n >> 8) & 255) * k)));
-  const b = Math.min(255, Math.max(0, Math.round((n & 255) * k)));
-  return `rgb(${r},${g},${b})`;
+const shades = new Map<string, string>();
+/** A colour made darker (k < 1) or lighter (k > 1). Takes "#rrggbb" or "rgb(r,g,b)". */
+function shade(c: string, k: number): string {
+  const key = c + k;
+  let out = shades.get(key);
+  if (out) return out;
+  let r: number, g: number, b: number;
+  if (c[0] === '#') { const n = parseInt(c.slice(1), 16); r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255; }
+  else { const m = c.match(/\d+/g)!; r = +m[0]; g = +m[1]; b = +m[2]; }
+  const f = (v: number) => Math.min(255, Math.max(0, Math.round(v * k)));
+  out = `rgb(${f(r)},${f(g)},${f(b)})`;
+  shades.set(key, out);
+  return out;
+}
+
+/**
+ * Each player's own build, worked out from their stats so no two stand alike: jumpers and
+ * sprinters are long in the leg, strong players broad in the shoulder and thick in the limb,
+ * heavy ones thick through the middle and a little stooped.
+ */
+interface Figure { leg: number; chest: number; waist: number; belly: number; limb: number; hunch: number; head: number }
+const figures = new Map<PlayerDef, Figure>();
+function figureOf(d: PlayerDef): Figure {
+  let f = figures.get(d);
+  if (!f) {
+    const heavy = clamp01((d.build - 1) * 4 + (d.power - 0.7) * 1.2);
+    f = {
+      leg: Math.min(1.2, Math.max(0.82, 1 + (d.jump - 0.68) * 1.5 + (d.speed - 0.65) * 0.5)),
+      chest: d.build * (0.94 + 0.22 * d.power),
+      waist: d.build * (0.84 + 0.4 * heavy - 0.12 * d.speed),
+      belly: 4.6 * heavy,
+      limb: 0.8 + 0.34 * d.power + 0.5 * (d.build - 1),
+      hunch: 0.07 * heavy,
+      head: 1,
+    };
+    // Long-legged players carry a smaller head, squat ones a bigger one: it widens the gap in how tall they read.
+    f.head = Math.min(1.12, Math.max(0.9, 1.04 - (f.leg - 1) * 0.6));
+    figures.set(d, f);
+  }
+  return f;
+}
+
+/** Values for the figure being drawn right now, shared by the drawing helpers. */
+const cur = { hair: 0, cloth: 0, flare: 0 };
+
+type Hand = 'fist' | 'open' | 'grip' | 'point';
+/** What each hand (front, back) is doing in this move. */
+function handsFor(p: Player, look: PlayerLook): [Hand, Hand] {
+  switch (p.state) {
+    case 'punch': return p.weapon === 'bat' ? ['grip', 'grip'] : ['fist', 'fist'];
+    case 'tackle': case 'pound': case 'spray': case 'airkick': return ['fist', 'fist'];
+    case 'down': case 'held': case 'stun': case 'beam': return ['open', 'open'];
+    case 'shoot': case 'pass': case 'jump': case 'dunk': case 'grab': case 'toss': case 'spin': return ['open', 'open'];
+    case 'hang': return ['grip', 'open'];
+    case 'ride': return ['grip', 'grip'];
+    default: break;
+  }
+  if (look.celebrate) return p.id % 3 === 2 ? ['point', 'fist'] : ['fist', 'fist'];
+  if (look.carrying) return ['grip', 'grip'];
+  if (look.hasBall) return ['open', 'open'];
+  return Math.hypot(p.vx, p.vz) < 25 ? ['open', 'open'] : ['fist', 'fist'];
 }
 
 // ---------------------------------------------------------------- poses
@@ -264,12 +325,22 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
         P.armF = 2.6 + f * 0.6; P.armB = 2.6 - f * 0.6; P.elbowF = 0.2; P.elbowB = 0.2;
         P.fFx = 4 + f * 6; P.fFy = 6 + c * 3; P.fBx = -4 - f * 6; P.fBy = 5 - c * 3;
       } else {
-        // Reaching up for a block or rebound.
-        P.armF = 2.6; P.armB = 2.4; P.elbowF = 0.1; P.elbowB = 0.15; P.head = -0.15;
+        // Three poses blended by how fast the jumper is rising or falling. Going up: arms thrown high,
+        // back arched, legs trailing. Over the top: knees tucked. Coming down: arms out for balance,
+        // legs reaching for the floor.
+        const up = clamp01(p.vy / 380), fall = clamp01(-p.vy / 380), top = Math.max(0, 1 - up - fall);
+        P.armF = 2.75 - 1.15 * fall; P.armB = 2.5 - 1.4 * fall; P.elbowF = 0.1 + 0.55 * fall; P.elbowB = 0.15 + 0.5 * fall;
+        P.head = -0.2 * up + 0.14 * fall; P.lean = -0.12 * up + 0.12 * fall;
+        P.fFx = 3 * up + 9 * top + 7 * fall; P.fFy = 2 * up + 13 * top + 1 * fall;
+        P.fBx = -8 * up - 7 * top - 3 * fall; P.fBy = 6 * up + 9 * top + 2 * fall;
       }
       break;
     case 'shoot':
-      if (!p.released) {
+      if (!p.released && t < 0.09) {
+        // Gather: the ball comes up through the chest, knees still loaded.
+        rate = 40;
+        P.armF = 1.2; P.elbowF = 1.4; P.armB = 0.95; P.elbowB = 1.55; P.lean = 0.14; P.head = 0.06; P.hipH = HIP - 2;
+      } else if (!p.released) {
         // Ball set overhead, elbows bent.
         P.armF = 2.45; P.elbowF = 0.25; P.armB = 2.3; P.elbowB = 0.3; P.lean = -0.06; P.head = -0.12;
       } else {
@@ -350,10 +421,17 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       P.fFx = -2; P.fFy = 1; P.fBx = -6; P.fBy = 3; P.hipH = HIP - 1.5; P.lean = 0.1; P.head = -0.5;
       break;
     case 'airkick':
-      rate = 45;
-      P.rot = -0.5;
-      P.fFx = 20; P.fFy = 12; P.fBx = -5; P.fBy = 12;
-      P.armF = -0.8; P.elbowF = 0.6; P.armB = 1.3; P.elbowB = 0.8; P.lean = -0.1;
+      rate = 55;
+      if (t < 0.06) {
+        // Chamber: knee pulled up to the chest, body coiled.
+        P.rot = -0.2; P.fFx = 9; P.fFy = 18; P.fBx = -3; P.fBy = 10;
+        P.armF = 0.9; P.elbowF = 1.3; P.armB = 0.6; P.elbowB = 1.4; P.lean = 0.2;
+      } else {
+        // Snap: the leg fires straight out, the body thrown back behind it.
+        P.rot = -0.55;
+        P.fFx = 22; P.fFy = 12; P.fBx = -5; P.fBy = 12;
+        P.armF = -0.8; P.elbowF = 0.6; P.armB = 1.3; P.elbowB = 0.8; P.lean = -0.1;
+      }
       break;
     case 'spin':
       P.armF = 1.57; P.armB = -1.57; P.elbowF = 0; P.elbowB = 0; P.hipH = HIP - 3; P.fFx = 7; P.fBx = -7;
@@ -439,8 +517,17 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
     }
     case 'pass':
       // Chest pass: both arms thrust forward, a step into it.
-      rate = 45;
-      P.armF = 1.55; P.elbowF = 0; P.armB = 1.4; P.elbowB = 0.1; P.lean = 0.24; P.fFx = 10;
+      rate = 60;
+      if (t < 0.045) {
+        // Gather at the chest, weight back.
+        P.armF = 1.15; P.elbowF = 1.5; P.armB = 0.95; P.elbowB = 1.6; P.lean = -0.04; P.hipX = -2;
+      } else if (t < 0.11) {
+        // Snap: both arms shoot out, a step into it.
+        P.armF = 1.6; P.elbowF = 0; P.armB = 1.45; P.elbowB = 0.05; P.lean = 0.3; P.fFx = 11; P.hipX = 3; P.head = 0.05;
+      } else {
+        // Follow-through: hands drop, palms out.
+        P.armF = 1.3; P.elbowF = 0.15; P.armB = 1.15; P.elbowB = 0.2; P.lean = 0.24; P.fFx = 10;
+      }
       break;
     case 'dunk': {
       rate = 40;
@@ -480,74 +567,118 @@ function strokePath(ctx: CanvasRenderingContext2D, pts: number[], w: number, col
   ctx.stroke();
 }
 
+/** One segment of a limb, lit from the front: a darker edge behind, the full colour toward the light. */
+function limb(ctx: CanvasRenderingContext2D, pts: number[], w: number, color: string) {
+  strokePath(ctx, pts, w, shade(color, 0.76));
+  ctx.save();
+  ctx.translate(0.75, -0.55);
+  strokePath(ctx, pts, w * 0.66, color);
+  ctx.restore();
+}
+
 /** A leg from the hip to a foot target. The knee position is solved so the foot lands where asked. */
-function leg(ctx: CanvasRenderingContext2D, hx: number, hy: number, fx: number, soleY: number, thigh: string, shin: string, shoe: string, trim: string) {
+function leg(ctx: CanvasRenderingContext2D, hx: number, hy: number, fx: number, soleY: number, thigh: string, shin: string, shoe: string, trim: string, len = LEG, w = 1) {
   let fy = -soleY - ANKLE;
   let dx = fx - hx, dy = fy - hy;
   let dist = Math.hypot(dx, dy);
-  const max = LEG * 2 - 0.2;
+  const max = len * 2 - 0.2;
   if (dist > max) { fx = hx + (dx / dist) * max; fy = hy + (dy / dist) * max; dx = fx - hx; dy = fy - hy; dist = max; }
   if (dist < 1) dist = 1;
-  const h = Math.sqrt(Math.max(0, LEG * LEG - (dist / 2) * (dist / 2)));
+  const h = Math.sqrt(Math.max(0, len * len - (dist / 2) * (dist / 2)));
   // The knee always bends forward.
   let nx = dy / dist, ny = -dx / dist;
   if (nx < 0) { nx = -nx; ny = -ny; }
   const kx = hx + dx / 2 + nx * h, ky = hy + dy / 2 + ny * h;
   // Outline first: a thick thigh, a calf that swells below the knee and narrows to the ankle.
-  strokePath(ctx, [hx, hy, kx, ky], 12.4, OUT);
-  strokePath(ctx, [kx, ky, fx, fy], 9.6, OUT);
-  const cx = kx + (fx - kx) * 0.3, cy = ky + (fy - ky) * 0.3;
-  strokePath(ctx, [kx, ky, cx, cy], 11, OUT);
-  strokePath(ctx, [kx, ky, fx, fy], 7, shin);
-  strokePath(ctx, [kx, ky, cx, cy], 8.4, shin);
+  const cx = kx + (fx - kx) * 0.32, cy = ky + (fy - ky) * 0.32;
+  strokePath(ctx, [hx, hy, kx, ky], 9.8 * w + 2.6, OUT);
+  strokePath(ctx, [kx, ky, fx, fy], 6.6 * w + 2.6, OUT);
+  strokePath(ctx, [kx, ky, cx, cy], 8.6 * w + 2.6, OUT);
+  limb(ctx, [kx, ky, fx, fy], 6.6 * w, shin);
+  limb(ctx, [kx, ky, cx, cy], 8.6 * w, shin);
   // Sock.
-  strokePath(ctx, [kx + (fx - kx) * 0.6, ky + (fy - ky) * 0.6, fx, fy], 7, shoe);
-  strokePath(ctx, [hx, hy, kx, ky], 9.8, thigh);
-  // Shoe: toes dip when the foot is off the ground.
+  strokePath(ctx, [kx + (fx - kx) * 0.62, ky + (fy - ky) * 0.62, fx, fy], 6.6 * w, shoe);
+  // The leg of the shorts covers the thigh.
+  limb(ctx, [hx, hy, kx, ky], 9.8 * w, thigh);
+  // Shoe: a high-top with a dark sole and a toe cap. The toes dip when the foot is off the ground.
   ctx.save();
   ctx.translate(fx, fy);
   ctx.rotate(Math.min(0.7, soleY * 0.07));
-  ctx.fillStyle = shoe;
-  roundRect(ctx, -4.5, -3.6, 14, 7.4, 3);
-  ctx.fill();
   ctx.lineWidth = 1.3;
   ctx.strokeStyle = OUT;
-  ctx.stroke();
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = shoe;
+  ctx.beginPath();
+  ctx.moveTo(-4.8, 3.6); ctx.lineTo(-4.8, -3.4); ctx.quadraticCurveTo(-1, -5.4, 3, -3.2);
+  ctx.lineTo(8.4, -1.4); ctx.quadraticCurveTo(11.4, 0.4, 10.4, 3.6); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#2b2533';
+  ctx.fillRect(-4.6, 1.9, 15, 1.9);
   ctx.fillStyle = trim;
-  ctx.fillRect(-3.4, 1.4, 11.8, 1.8);
+  ctx.beginPath(); ctx.moveTo(-0.6, -3.6); ctx.lineTo(2.2, -3); ctx.lineTo(0.6, 1.8); ctx.lineTo(-2.2, 1.8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath(); ctx.ellipse(7.4, -0.2, 1.8, 0.9, 0.3, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }
 
-/** An arm from the shoulder: upper arm at `ang`, forearm bent by `elbow`, ending in a fist. */
-function arm(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, elbow: number, skin: string, band: string) {
+/** A hand at the end of a forearm pointing along `dir` (0 = down, positive = forward). */
+function drawHand(ctx: CanvasRenderingContext2D, x: number, y: number, dir: number, hand: Hand, skin: string) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-dir); // local +y now runs along the forearm, out past the wrist
+  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = OUT;
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = skin;
+  if (hand === 'open') {
+    // Thumb first (it sits behind the palm), then a palm with the fingers spread a little.
+    ctx.beginPath(); ctx.ellipse(4.3, 2.2, 1.7, 3.1, -0.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-3.6, -1.5); ctx.lineTo(3.6, -1.5); ctx.lineTo(4.2, 8.6);
+    ctx.quadraticCurveTo(0, 10.8, -4.2, 8.6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    for (const fx of [-1.5, 0.3, 2.1]) { ctx.moveTo(fx, 4.6); ctx.lineTo(fx * 1.15, 9.2); }
+    ctx.stroke();
+  } else {
+    if (hand === 'point') {
+      ctx.beginPath(); roundRect(ctx, -1.3, 3, 2.6, 8.2, 1.2); ctx.fill(); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(0, 1.2, hand === 'grip' ? 5 : 5.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Knuckles across the front, thumb folded over the side.
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-3, 3.6); ctx.quadraticCurveTo(0, 5.2, 3, 3.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(2.2, -1.8); ctx.quadraticCurveTo(4.6, 0.6, 2.4, 2.6); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** An arm from the shoulder: upper arm at `ang`, forearm bent by `elbow`, ending in a hand. */
+function arm(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, elbow: number, skin: string, band: string, hand: Hand = 'fist', w = 1) {
   // Arms stretch when raised, cartoon-style, so the hands clear the oversized head.
   const L = 10 * (1 + 0.7 * clamp01((ang - 1.7) / 0.8) + 0.65 * clamp01((ang - 2.7) / 0.4));
   const kx = x0 + Math.sin(ang) * L, ky = y0 + Math.cos(ang) * L;
   const a2 = ang + elbow;
   const ex = kx + Math.sin(a2) * L, ey = ky + Math.cos(a2) * L;
-  // A shoulder and upper arm with some muscle on them, a slimmer forearm, a big fist.
-  strokePath(ctx, [x0, y0, kx, ky], 10.6, OUT);
-  strokePath(ctx, [kx, ky, ex, ey], 8.8, OUT);
-  strokePath(ctx, [kx, ky, ex, ey], 6.2, skin);
-  strokePath(ctx, [x0, y0, kx, ky], 8, skin);
+  // A shoulder and upper arm with some muscle on them, a slimmer forearm.
+  strokePath(ctx, [x0, y0, kx, ky], 7.8 * w + 2.6, OUT);
+  strokePath(ctx, [kx, ky, ex, ey], 6 * w + 2.6, OUT);
+  limb(ctx, [kx, ky, ex, ey], 6 * w, skin);
+  limb(ctx, [x0, y0, kx, ky], 7.8 * w, skin);
   // Wristband.
-  strokePath(ctx, [kx + (ex - kx) * 0.6, ky + (ey - ky) * 0.6, kx + (ex - kx) * 0.82, ky + (ey - ky) * 0.82], 6.6, band);
-  ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.arc(ex, ey, 5.3, 0, Math.PI * 2); ctx.fill();
-  ctx.lineWidth = 1.3;
-  ctx.strokeStyle = OUT;
-  ctx.stroke();
-  // Knuckles.
-  const ux = (ex - kx) / L, uy = (ey - ky) / L;
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(ex + ux * 1.2 - uy * 3, ey + uy * 1.2 + ux * 3); ctx.lineTo(ex + ux * 3.2 - uy * 1.2, ey + uy * 3.2 + ux * 1.2); ctx.stroke();
+  strokePath(ctx, [kx + (ex - kx) * 0.6, ky + (ey - ky) * 0.6, kx + (ex - kx) * 0.82, ky + (ey - ky) * 0.82], 6.4 * w, band);
+  drawHand(ctx, ex, ey, a2, hand, skin);
   return [ex, ey] as const;
 }
 
 /** Draws the figure with its feet at the origin. `base` is the transform at the feet, used to report the hand position. */
 function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, look: PlayerLook, time: number, flip: number, base: DOMMatrix | null, turn: number) {
   const d = p.def;
-  const bw = d.build;
+  const fig = figureOf(d);
+  const [handF, handB] = handsFor(p, look);
+  const sw = 11 * fig.chest, ww = 11 * fig.waist;
+  const shX = Math.min(5.5, sw * 0.3); // how far the shoulders sit either side of the spine, seen side-on
   const skin = d.skin;
   const dir = Math.sign(flip) || 1;
   ctx.save();
@@ -561,44 +692,56 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
   if (P.rot || P.rotY) { ctx.translate(0, -P.rotY); ctx.rotate(P.rot); }
   if (p.invuln > 0 && Math.floor(time * 20) % 2 === 0) ctx.globalAlpha *= 0.5;
 
-  const hipY = -P.hipH;
+  const hipY = -P.hipH * fig.leg;
   const upper = (fn: () => void) => {
     ctx.save();
     ctx.translate(P.hipX, hipY);
-    ctx.rotate(P.lean);
+    ctx.rotate(P.lean + fig.hunch);
     fn();
     ctx.restore();
   };
 
   // Back arm, behind everything.
-  upper(() => arm(ctx, -3, -21, P.armB, P.elbowB, shade(skin, 0.7), shade(team.trim, 0.7)));
+  upper(() => arm(ctx, -shX, -21, P.armB, P.elbowB, shade(skin, 0.7), shade(team.trim, 0.7), handB, fig.limb * 0.95));
   // Legs.
-  leg(ctx, P.hipX - 3, hipY, P.fBx, P.fBy, shade(team.shorts, 0.72), shade(skin, 0.8), '#cfcfd6', shade(team.trim, 0.8));
-  leg(ctx, P.hipX + 3, hipY, P.fFx, P.fFy, team.shorts, skin, '#ffffff', team.trim);
+  leg(ctx, P.hipX - 3, hipY, P.fBx, P.fBy, shade(team.shorts, 0.72), shade(skin, 0.8), '#cfcfd6', shade(team.trim, 0.8), LEG * fig.leg, fig.limb);
+  leg(ctx, P.hipX + 3, hipY, P.fFx, P.fFy, team.shorts, skin, '#ffffff', team.trim, LEG * fig.leg, fig.limb);
 
   upper(() => {
     ctx.lineWidth = 1.4;
     ctx.strokeStyle = OUT;
-    // Shorts.
+    ctx.lineJoin = 'round';
+    // Shorts: cut wide. The hem swings behind the motion and flies up in a fall.
+    const hem = cur.cloth * 3, fl = 1 + cur.flare * 0.12, hy0 = 5 - cur.flare * 1.6;
     ctx.fillStyle = team.shorts;
-    roundRect(ctx, -10.5 * bw, -7, 21 * bw, 11.5, 3); ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-ww + 0.5, -7.5); ctx.lineTo(ww - 0.5, -7.5);
+    ctx.lineTo((ww + 1) * fl + hem, hy0); ctx.lineTo((-ww - 1) * fl + hem * 1.3, hy0);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = team.trim;
-    ctx.fillRect(2.5, -4.5, 2.6, 8.4);
-    // Jersey.
-    ctx.fillStyle = team.jersey;
-    roundRect(ctx, -11 * bw, -28, 22 * bw, 23.5, 7); ctx.fill(); ctx.stroke();
-    // Two-tone shading: dark toward the back, light across the chest.
-    ctx.fillStyle = shade(team.jersey, 0.74);
-    roundRect(ctx, -11 * bw + 0.8, -26.5, 6.5, 20, 4); ctx.fill();
-    ctx.fillStyle = shade(team.jersey, 1.16);
-    roundRect(ctx, 11 * bw - 7.5, -25.5, 5, 9, 2.5); ctx.fill();
+    ctx.fillRect(2.5 + hem * 0.5, -4.5, 2.6, hy0 - 1 + 4.5);
+    // Jersey: broad at the shoulder, cut to this player's waist, lit from the front. Its tail lifts and trails.
+    const lit = ctx.createLinearGradient(-sw, 0, sw, 0);
+    lit.addColorStop(0, shade(team.jersey, 0.64)); lit.addColorStop(0.5, team.jersey); lit.addColorStop(1, shade(team.jersey, 1.15));
+    ctx.fillStyle = lit;
+    ctx.beginPath();
+    ctx.moveTo(-sw + 4, -28); ctx.lineTo(sw - 4, -28);
+    ctx.quadraticCurveTo(sw + 0.5, -27.5, sw, -22.5);
+    ctx.quadraticCurveTo((sw + ww) / 2 + fig.belly, -13, ww, -5);
+    ctx.lineTo(-ww + hem * 0.9, -4.6 - Math.abs(cur.cloth) * 0.9);
+    ctx.quadraticCurveTo(-(sw + ww) / 2 - 0.5, -14, -sw, -22.5);
+    ctx.quadraticCurveTo(-sw - 0.5, -27.5, -sw + 4, -28);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // The jersey's shadow on the shorts.
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(-ww + 1.2, -4.6, ww * 2 - 2.4, 1.8);
     // Neckline.
     ctx.fillStyle = team.trim;
     ctx.beginPath(); ctx.moveTo(-5, -28); ctx.lineTo(8, -28); ctx.lineTo(3, -23.2); ctx.closePath(); ctx.fill();
     ctx.fillStyle = shade(skin, 0.86);
     ctx.beginPath(); ctx.moveTo(-3, -28); ctx.lineTo(6.4, -28); ctx.lineTo(2.8, -24.6); ctx.closePath(); ctx.fill();
     ctx.fillStyle = team.trim;
-    ctx.fillRect(-11 * bw + 0.8, -7, 22 * bw - 1.6, 2.4);
+    ctx.fillRect(-ww + 0.9, -7, ww * 2 - 1.8, 2.4);
     ctx.save();
     ctx.scale(dir, 1);
     ctx.font = 'bold 11px "Trebuchet MS", sans-serif';
@@ -614,6 +757,7 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
       ctx.save();
       ctx.translate(HX, -27);
       ctx.rotate(P.head);
+      ctx.scale(fig.head, fig.head);
       ctx.translate(-HX, 27);
       drawHead(ctx, p, team, look, -40, time, dir);
       ctx.restore();
@@ -622,7 +766,7 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
     // A raised arm goes behind the head, so it never covers the face.
     const raised = P.armF > 2.05;
     const frontArm = () => {
-      const [ex, ey] = arm(ctx, 3, -21, P.armF, P.elbowF, skin, team.trim);
+      const [ex, ey] = arm(ctx, shX, -21, P.armF, P.elbowF, skin, team.trim, handF, fig.limb);
       if (base) {
         const q = base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(ex, ey)));
         hands.set(p.id, { dx: q.x, dy: q.y });
@@ -661,7 +805,7 @@ let flashCv: HTMLCanvasElement | null = null;
 export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, sx: number, time: number, look: PlayerLook) {
   let a = anims.get(p.id);
   if (!a) {
-    a = { pose: targetPose(p, look, time).pose, ready: false, wasAir: false, landT: 0, lastState: p.state, hitT: 0, lastFacing: p.facing, turnT: 0, vel: {}, rag: null, pvx: p.vx, pvy: p.vy, sway: 0, swayV: 0 };
+    a = { pose: targetPose(p, look, time).pose, ready: false, wasAir: false, landT: 0, lastState: p.state, hitT: 0, lastFacing: p.facing, turnT: 0, vel: {}, rag: null, pvx: p.vx, pvy: p.vy, sway: 0, swayV: 0, cloth: 0, clothV: 0, hair: 0, hairV: 0, flare: 0, ghosts: [], tick: 0 };
     anims.set(p.id, a);
   }
   // Ease the drawn pose toward the target.
@@ -693,6 +837,13 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     const want = clampN(-ax * p.facing * 0.00022, 0.32);
     a.swayV += (-2 * 0.45 * 16 * a.swayV - 16 * 16 * (a.sway - want)) * dt;
     a.sway = clampN(a.sway + a.swayV * dt, 0.45);
+    // Shorts, jersey tail, hair and headband trail behind the motion and bounce back when it stops or turns.
+    const fwd = p.vx * p.facing;
+    a.clothV += (-2 * 0.3 * 13 * a.clothV - 13 * 13 * (a.cloth - clampN(-fwd / 230, 1.2))) * dt;
+    a.cloth = clampN(a.cloth + a.clothV * dt, 1.8);
+    a.hairV += (-2 * 0.26 * 15 * a.hairV - 15 * 15 * (a.hair - clampN(-fwd / 300 - ax * p.facing * 0.00012, 1))) * dt;
+    a.hair = clampN(a.hair + a.hairV * dt, 1.5);
+    a.flare += (clampN(-p.vy / 500, 1.2) - a.flare) * Math.min(1, 12 * dt);
   }
 
   // Knocked down: the limbs go limp. They come back under control as the player pushes up.
@@ -753,6 +904,25 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   // Hit pause: the one who got hit shakes on the spot.
   if (p.freeze > 0 && (p.state === 'stun' || p.state === 'down')) sx += Math.sin(time * 95 + p.id) * 2.8;
 
+  cur.hair = a.hair; cur.cloth = a.cloth; cur.flare = Math.max(0, a.flare);
+  // Afterimages behind the fastest moves: the last few poses, fading.
+  const fast = p.state === 'spin' || p.state === 'tackle' || p.state === 'airkick' || p.state === 'toss' || p.state === 'dunk'
+    || (p.state === 'punch' && (p.weapon === 'bat' || p.combo >= 2)) || (p.state === 'down' && p.thrown && p.y > 0);
+  if (!fast) a.ghosts.length = 0;
+  else {
+    a.ghosts.forEach((g, i) => {
+      ctx.save();
+      ctx.globalAlpha *= 0.1 + 0.11 * i;
+      ctx.translate(g.x, g.y);
+      body(ctx, p, team, g.P, look, time, g.flip, null, g.turn);
+      ctx.restore();
+    });
+    if (dt > 0 && a.tick++ % 2 === 0) {
+      a.ghosts.push({ P, x: sx, y: footY, flip, turn });
+      if (a.ghosts.length > 3) a.ghosts.shift();
+    }
+  }
+
   if (a.hitT > 0) {
     // Hit flash: draw the figure off-screen, paint it white, then stamp it.
     flashCv ??= Object.assign(document.createElement('canvas'), { width: 440, height: 440 });
@@ -799,17 +969,31 @@ function drawHead(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, look:
   const mood = look.mood;
   // Hair lags behind vertical motion a little.
   const hb = Math.max(-2.5, Math.min(2.5, p.vy * 0.006));
-  const hair = (fill: () => void) => {
+  // Hair leans away from the motion: sheared about the hairline, so the tips move most.
+  const hair = (fill: () => void, give = 1) => {
+    ctx.save();
+    ctx.translate(HX, hy - 9); ctx.transform(1, 0, -cur.hair * 0.4 * give, 1, 0, 0); ctx.translate(-HX, -(hy - 9));
     ctx.fillStyle = d.hair;
     fill();
     ctx.lineWidth = 1.2;
     ctx.strokeStyle = OUT;
     ctx.stroke();
+    ctx.restore();
   };
+  // The headband's loose ends stream out behind.
+  ctx.lineCap = 'round';
+  for (let k = 0; k < 2; k++) {
+    const bx = HX - 13.2, by = hy - 7.6 + k * 1.2;
+    const ex = bx - 5.5 + cur.hair * 8 * (1 - k * 0.25), ey = by + 7.5 - Math.abs(cur.hair) * 5.5 + k * 3 + Math.sin(time * 13 + k * 2 + p.id) * 1.3 * Math.abs(cur.hair);
+    for (const [w, c] of [[4.6, OUT], [2.8, k ? shade(team.trim, 0.8) : team.trim]] as const) {
+      ctx.strokeStyle = c; ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(bx - 4 + cur.hair * 3, by + 1.2, ex, ey); ctx.stroke();
+    }
+  }
 
   // Hair that sits behind the head.
   if (d.hairStyle === 'afro') {
-    hair(() => { ctx.beginPath(); ctx.arc(HX - 2, hy - 5 - hb * 0.6, HR + 6, 0, Math.PI * 2); ctx.fill(); });
+    hair(() => { ctx.beginPath(); ctx.arc(HX - 2, hy - 5 - hb * 0.6, HR + 6, 0, Math.PI * 2); ctx.fill(); }, 0.45);
   } else if (d.hairStyle === 'bun') {
     hair(() => { ctx.beginPath(); ctx.arc(HX - 11, hy - 13 - hb, 6.5, 0, Math.PI * 2); ctx.fill(); });
   }
@@ -876,7 +1060,7 @@ function drawHead(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, look:
   const gx = Math.max(-0.5, Math.min(1.5, ((look.gazeX * dir) / gl) * 1.5));
   const gy = Math.max(-1.2, Math.min(1.2, (-look.gazeY / gl) * 1.2));
   const blink = (time * 0.9 + p.id * 0.37) % 3.1 < 0.1;
-  drawFace(ctx, mood, hy, gx, gy, blink);
+  drawFace(ctx, mood, hy, gx, gy, blink, skin);
 
   if (mood === 'dizzy') {
     ctx.fillStyle = '#ffe14a';
@@ -906,7 +1090,7 @@ function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
 }
 
 /** The face looks toward +x. Two eyes (near and far), brows, and a mouth, all driven by mood. */
-function drawFace(ctx: CanvasRenderingContext2D, mood: Mood, hy: number, gx: number, gy: number, blink: boolean) {
+function drawFace(ctx: CanvasRenderingContext2D, mood: Mood, hy: number, gx: number, gy: number, blink: boolean, skin: string) {
   const ink = '#1b1414';
   const ey = hy + 1.5;
   const eyes: [number, number, number][] = [[HX + 7.5, 1, 1], [HX + 0.5, 0.8, -1]]; // x, size, side (toward nose = -side)
@@ -929,26 +1113,45 @@ function drawFace(ctx: CanvasRenderingContext2D, mood: Mood, hy: number, gx: num
     } else if (mood === 'happy') {
       ctx.lineWidth = 1.8;
       ctx.beginPath(); ctx.arc(ex, ey + 1.5, 3 * sc, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
-    } else if (blink) {
+    } else if (blink || (mood === 'aim' && side < 0)) {
+      // A blink, or the far eye shut to line up a shot.
       ctx.lineWidth = 1.6;
       ctx.beginPath(); ctx.moveTo(ex - 3 * sc, ey + 0.5); ctx.lineTo(ex + 3 * sc, ey + 0.5); ctx.stroke();
     } else {
+      // Eye shape carries the mood: wide in shock, narrowed when straining, half-lidded when smug or spent.
+      const ry = mood === 'sad' ? 3 : mood === 'grit' ? 2.7 : mood === 'shock' ? 5.7 : mood === 'shout' ? 4.9 : mood === 'aim' ? 3.6 : 4.4;
+      const rx = 3.5 * sc * (mood === 'shock' ? 1.15 : 1);
       ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.ellipse(ex, ey, 3.5 * sc, mood === 'sad' ? 3 : 4.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 0.8;
       ctx.stroke();
       ctx.fillStyle = ink;
-      const py = mood === 'sad' ? 1.3 : gy;
-      ctx.beginPath(); ctx.arc(ex + gx * sc, ey + py, 2 * sc, 0, Math.PI * 2); ctx.fill();
+      const py = mood === 'sad' || mood === 'tired' ? 1.3 : mood === 'shock' ? 0 : Math.max(-ry + 2.2, Math.min(ry - 2.2, gy));
+      const pr = (mood === 'shock' ? 1.1 : 2) * sc;
+      ctx.beginPath(); ctx.arc(ex + gx * sc, ey + py, pr, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(ex + gx * sc + 0.7, ey + py - 0.8, 0.6, 0, Math.PI * 2); ctx.fill();
+      const lid = mood === 'smug' ? 0.46 : mood === 'tired' ? 0.58 : 0;
+      if (lid) {
+        const yl = ey - ry + 2 * ry * lid;
+        ctx.save();
+        ctx.beginPath(); ctx.ellipse(ex, ey, rx + 0.5, ry + 0.5, 0, 0, Math.PI * 2); ctx.clip();
+        ctx.fillStyle = skin;
+        ctx.fillRect(ex - rx - 1, ey - ry - 1, rx * 2 + 2, yl - (ey - ry - 1));
+        ctx.restore();
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(ex - rx, yl); ctx.lineTo(ex + rx, yl); ctx.stroke();
+      }
     }
     // Brows.
     const inner = ex - side * 3.4 * sc, outer = ex + side * 3.4 * sc;
     let yi = ey - 6.8, yo = ey - 6.8, lw = 1.3;
-    if (mood === 'angry') { yi = ey - 4.4; yo = ey - 8; lw = 2.1; }
-    else if (mood === 'sad' || mood === 'pain') { yi = ey - 8.2; yo = ey - 5.4; lw = 1.5; }
-    else if (mood === 'focus' || mood === 'effort') { yi = ey - 5.6; yo = ey - 6.8; lw = 1.8; }
+    if (mood === 'angry' || mood === 'shout') { yi = ey - 4.4; yo = ey - 8; lw = 2.1; }
+    else if (mood === 'grit') { yi = ey - 3.6; yo = ey - 6.6; lw = 2.3; }
+    else if (mood === 'shock') { yi = ey - 9.6; yo = ey - 9; lw = 1.3; }
+    else if (mood === 'smug') { if (side > 0) { yi = ey - 8.8; yo = ey - 8; lw = 1.6; } else { yi = ey - 5.4; yo = ey - 5.8; lw = 1.6; } }
+    else if (mood === 'sad' || mood === 'pain' || mood === 'tired') { yi = ey - 8.2; yo = ey - 5.4; lw = 1.5; }
+    else if (mood === 'focus' || mood === 'effort' || mood === 'aim') { yi = ey - 5.6; yo = ey - 6.8; lw = 1.8; }
     else if (mood === 'happy') { yi = ey - 7.6; yo = ey - 7.6; lw = 1.2; }
     if (mood !== 'dizzy') {
       ctx.strokeStyle = ink;
@@ -991,6 +1194,46 @@ function drawFace(ctx: CanvasRenderingContext2D, mood: Mood, hy: number, gx: num
       break;
     case 'focus':
       ctx.beginPath(); ctx.moveTo(mx - 2.5, my); ctx.lineTo(mx + 2.5, my - 0.6); ctx.stroke();
+      break;
+    case 'shout':
+      // Roaring: mouth wide open, teeth and tongue.
+      ctx.fillStyle = '#3a0d0d';
+      roundRect(ctx, mx - 5.2, my - 4.2, 10.6, 10.4, 3.2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(mx - 4.4, my - 4.2, 9, 2.3);
+      ctx.fillStyle = '#ff6b7a';
+      ctx.beginPath(); ctx.ellipse(mx + 0.2, my + 3.8, 3.2, 2, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'grit':
+      // Teeth clenched.
+      ctx.fillStyle = '#ffffff';
+      roundRect(ctx, mx - 5.6, my - 2.7, 11.2, 5.6, 1.7); ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(mx - 5.6, my + 0.1); ctx.lineTo(mx + 5.6, my + 0.1);
+      for (const tx of [-2.8, 0, 2.8]) { ctx.moveTo(mx + tx, my - 2.7); ctx.lineTo(mx + tx, my + 2.9); }
+      ctx.stroke();
+      break;
+    case 'shock':
+      ctx.fillStyle = '#3a0d0d';
+      ctx.beginPath(); ctx.ellipse(mx - 0.5, my + 1, 2.4, 3.3, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'smug':
+      // A one-sided smirk.
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(mx - 3.6, my + 0.4); ctx.quadraticCurveTo(mx + 1.2, my + 2.8, mx + 4.8, my - 2.4); ctx.stroke();
+      break;
+    case 'aim':
+      // Concentrating, tongue out at the corner.
+      ctx.beginPath(); ctx.moveTo(mx - 2.6, my); ctx.lineTo(mx + 2.6, my - 0.4); ctx.stroke();
+      ctx.fillStyle = '#ff6b7a';
+      ctx.beginPath(); ctx.ellipse(mx + 3.4, my + 1.3, 1.7, 1.4, 0.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      break;
+    case 'tired':
+      // Panting, tongue hanging.
+      ctx.fillStyle = '#3a0d0d';
+      ctx.beginPath(); ctx.ellipse(mx, my, 3.2, 3.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff6b7a';
+      ctx.beginPath(); ctx.ellipse(mx + 0.6, my + 3.6, 2, 2.6, 0, 0, Math.PI * 2); ctx.fill();
       break;
     case 'effort':
       // Mouth open, breathing hard.
