@@ -1,4 +1,4 @@
-import { DUNK_RANGE, GRAVITY, HOOP, JUMP_V, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
+import { DUNK_RANGE, HOOP, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
 import { Game, Intent, Player, distXZ } from './game';
 import { makeRng } from './rng';
 import type { Difficulty } from './teams';
@@ -12,18 +12,22 @@ export interface AIParams {
   blockSkill: number;
   /** Chance to pass out of pressure. */
   passIQ: number;
-  useSpecial: boolean;
+  /** Chance to commit to a running tackle when lined up with the ball carrier. */
+  tackle: number;
+  /** Chance to dodge out of pressure. */
+  dodge: number;
   /** Shot release timing error (seconds). */
   jitter: number;
 }
 
 export const AI_PARAMS: Record<Difficulty, AIParams> = {
-  easy: { react: 0.34, aggression: 0.2, blockSkill: 0.22, passIQ: 0.35, useSpecial: true, jitter: 0.12 },
-  normal: { react: 0.22, aggression: 0.36, blockSkill: 0.42, passIQ: 0.55, useSpecial: true, jitter: 0.07 },
-  hard: { react: 0.13, aggression: 0.52, blockSkill: 0.62, passIQ: 0.7, useSpecial: true, jitter: 0.035 },
+  easy: { react: 0.34, aggression: 0.14, blockSkill: 0.2, passIQ: 0.35, tackle: 0.06, dodge: 0.1, jitter: 0.17 },
+  normal: { react: 0.22, aggression: 0.28, blockSkill: 0.4, passIQ: 0.55, tackle: 0.14, dodge: 0.3, jitter: 0.11 },
+  hard: { react: 0.13, aggression: 0.45, blockSkill: 0.6, passIQ: 0.7, tackle: 0.28, dodge: 0.5, jitter: 0.07 },
 };
 
-export const ACCURACY: Record<Difficulty, number> = { easy: 0.85, normal: 0.97, hard: 1.06 };
+/** Multiplier on the size of the sure-make release window. */
+export const ACCURACY: Record<Difficulty, number> = { easy: 0.85, normal: 1, hard: 1.1 };
 
 interface Brain {
   next: number;
@@ -34,6 +38,9 @@ interface Brain {
   action: boolean;
   special: boolean;
   jump: boolean;
+  tackle: boolean;
+  ttx: number;
+  ttz: number;
   startShot: boolean;
   releaseIn: number;
   holding: boolean;
@@ -41,11 +48,13 @@ interface Brain {
   hadBall: boolean;
   gotBallAt: number;
   lastPunch: number;
+  lastTackle: number;
 }
 
 const newBrain = (): Brain => ({
   next: 0, tx: 0, tz: 0, sprint: false, action: false, special: false, jump: false,
-  startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9,
+  tackle: false, ttx: 0, ttz: 0,
+  startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
 });
 
 export class AIController {
@@ -62,6 +71,7 @@ export class AIController {
     if (!b) { b = newBrain(); b.tx = p.x; b.tz = p.z; this.brains.set(p.id, b); }
     const out: Intent = { mx: 0, mz: 0, sprint: false, shoot: false, action: false, special: false };
     const now = g.time;
+    const P = this.params.get(p.id)!;
 
     const has = g.ball.holder === p.id;
     if (has && !b.hadBall) b.gotBallAt = now;
@@ -73,15 +83,46 @@ export class AIController {
       return out;
     }
 
+    // Reflexes that cannot wait for the next decision tick.
+    if (g.phase === 'play') {
+      // Teammate is in the air at the rim: throw the lob.
+      const mate = g.teammate(p);
+      if (has && p.state === 'move' && mate.state === 'jump' && mate.y > 8 && mate.vy > -120
+        && distXZ(mate.x, mate.z, attackHoopX(p.team), HOOP.z) < 190) {
+        out.action = true;
+        return out;
+      }
+      // In the air next to a shooter or dunker: kick them out of it.
+      if (!has && p.state === 'jump' && p.y > 14) {
+        for (const o of g.opponents(p)) {
+          if (o.state !== 'dunk' && o.state !== 'shoot') continue;
+          const dx = o.x - p.x;
+          if (Math.abs(dx) < 50 && Math.abs(o.z - p.z) < 24 && Math.abs(o.y - p.y) < 55 && this.rng() < P.aggression * 0.1) {
+            out.action = true;
+            out.face = dx >= 0 ? 1 : -1;
+            return out;
+          }
+        }
+      }
+    }
+
     if (now >= b.next) {
       this.think(p, b);
-      const P = this.params.get(p.id)!;
       b.next = now + P.react * (0.7 + 0.6 * this.rng());
     }
 
+    if (b.tackle) {
+      b.tackle = false;
+      const dx = b.ttx - p.x, dz = b.ttz - p.z;
+      const d = Math.hypot(dx, dz) || 1;
+      out.mx = dx / d;
+      out.mz = dz / d;
+      out.sprint = true;
+      out.action = true;
+      return out;
+    }
     if (b.action) {
       b.action = false;
-      const P = this.params.get(p.id)!;
       const isPunch = g.ball.holder !== p.id && !(g.holder()?.team === p.team);
       if (!isPunch || now - b.lastPunch > 0.9 - P.aggression * 0.6) {
         out.action = true;
@@ -143,12 +184,13 @@ export class AIController {
     const { o: opp, d: nd } = this.nearestOpp(p);
     const mate = g.teammate(p);
     const held = g.time - b.gotBallAt;
+    if (p.state !== 'move') return;
+    const full = g.hype[p.team] >= 1;
 
-    if (P.useSpecial && g.hype[p.team] >= 1 && d < 520 && p.state === 'move' && this.rng() < 0.5) {
+    if (full && d < (p.def.special === 'slam' ? 620 : 520) && this.rng() < 0.5) {
       b.special = true;
       return;
     }
-    if (p.state !== 'move') return;
 
     // Teammate (possibly the human) asked for the ball.
     if (g.passCall[p.team] > 0 && g.canAct(mate) && this.rng() < 0.9) { b.action = true; return; }
@@ -164,9 +206,8 @@ export class AIController {
     const desperate = g.shotClock < 2.6;
     const pullUp = d < THREE_PT + 40 && open && held > 1 && this.rng() < 0.18 * p.def.shoot;
     if ((d < range && open && held > 0.4) || desperate || pullUp) {
-      const vy0 = JUMP_V * (0.85 + 0.3 * p.def.jump);
       b.startShot = true;
-      b.releaseIn = Math.max(0.05, vy0 / GRAVITY + (this.rng() - 0.5) * 2 * P.jitter);
+      b.releaseIn = Math.max(0.05, g.apexTime(p) + (this.rng() - 0.5) * 2 * P.jitter);
       b.tx = p.x; b.tz = p.z;
       return;
     }
@@ -179,6 +220,9 @@ export class AIController {
     b.tx = hx - dir * (d < 260 ? 60 : 120);
     b.tz = HOOP.z + dodge * (nd < 90 ? 80 : 30);
     b.sprint = p.stamina > 0.35 && (nd > 60 || this.rng() < 0.3);
+
+    // Crowded: dodge through the defender along the drive line.
+    if (nd < 46 && !full && p.stamina > 0.4 && this.rng() < P.dodge) b.special = true;
   }
 
   /** True when no defender stands close to the straight passing line. */
@@ -213,6 +257,12 @@ export class AIController {
     b.tx = best.x;
     b.tz = best.z;
     b.sprint = distXZ(p.x, p.z, best.x, best.z) > 140 && p.stamina > 0.5;
+
+    // Open at the rim with the ball handler in range: jump and ask for the lob.
+    if (p.state === 'move' && holder.state === 'move' && distXZ(p.x, p.z, hx, HOOP.z) < 185
+      && distXZ(p.x, p.z, holder.x, holder.z) < 430 && this.nearestOpp(p).d > 34 && this.rng() < 0.12) {
+      b.jump = true;
+    }
   }
 
   private defend(p: Player, b: Brain, holder: Player) {
@@ -223,6 +273,12 @@ export class AIController {
     const myD = distXZ(p.x, p.z, holder.x, holder.z);
     const mateD = g.canAct(mate) ? distXZ(mate.x, mate.z, holder.x, holder.z) : Infinity;
     const primary = myD <= mateD;
+
+    if (g.hype[p.team] >= 1 && p.state === 'move') {
+      if (p.def.defSpecial === 'shockwave') {
+        if (this.nearestOpp(p).d < 125) { b.special = true; return; }
+      } else if (myD < 520 && this.rng() < 0.5) { b.special = true; return; }
+    }
 
     if (primary) {
       const vx = own - holder.x, vz = HOOP.z - holder.z;
@@ -237,6 +293,13 @@ export class AIController {
         b.jump = true;
       } else if (inReach && this.rng() < P.aggression) {
         b.face = holder.x > p.x ? 1 : -1; b.action = true;
+      } else if (holder.state === 'move' && p.state === 'move' && myD > 55 && myD < 135
+        && Math.abs(holder.z - p.z) < 30 && p.stamina > 0.3
+        && g.time - b.lastTackle > 1.5 + (1 - P.aggression) * 3 && this.rng() < P.tackle) {
+        b.lastTackle = g.time;
+        b.tackle = true;
+        b.ttx = holder.x + holder.vx * 0.15;
+        b.ttz = holder.z + holder.vz * 0.15;
       }
     } else {
       const other = g.teammate(holder);

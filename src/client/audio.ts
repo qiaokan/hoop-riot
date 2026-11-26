@@ -141,6 +141,21 @@ export class Sfx {
       case 'final':
         this.cheer(2);
         break;
+      case 'tackle':
+        this.noise(0.2, 'bandpass', 500, 0.3, 0.6);
+        break;
+      case 'spin':
+        this.noise(0.16, 'highpass', 1800, 0.18);
+        this.tone(500, 0.14, 'sine', 0.08, 1100);
+        break;
+      case 'oop':
+        this.tone(440, 0.22, 'triangle', 0.14, 880);
+        break;
+      case 'megaslam':
+      case 'blitz':
+        this.tone(120, 0.6, 'sawtooth', 0.2, 900);
+        this.noise(0.4, 'lowpass', 700, 0.4);
+        break;
       default:
         break;
     }

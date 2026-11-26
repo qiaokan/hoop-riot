@@ -153,7 +153,7 @@ function drawTitle(ctx: CanvasRenderingContext2D, t: number) {
   const rows = [
     `OPPONENT:  ◀ ${opp.team.name.toUpperCase()} (${opp.difficulty.toUpperCase()}) ▶`,
     `LENGTH:  ◀ ${LENGTHS[lenIndex] / 60} MIN ▶`,
-    'START GAME',
+    'START GAME  (ENTER)',
   ];
   const bx = VIEW_W / 2 - 250, by = 205;
   ctx.fillStyle = 'rgba(12,8,28,0.85)';
@@ -171,35 +171,39 @@ function drawTitle(ctx: CanvasRenderingContext2D, t: number) {
   });
   text(ctx, opp.blurb, VIEW_W / 2, by + 172, 'italic 15px "Trebuchet MS", sans-serif', '#ffffff', 'center', 4);
 
-  drawControls(ctx, 390);
-  if (Math.floor(t * 2) % 2 === 0) text(ctx, 'PRESS ENTER', VIEW_W / 2, 520, 'bold 16px "Trebuchet MS", sans-serif', '#ffe14a', 'center', 4);
+  drawControls(ctx, 384);
 }
 
 function drawControls(ctx: CanvasRenderingContext2D, y: number) {
   const lines = [
     ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
-    ['SHOOT / JUMP', 'J or Space (hold, release at the top)', 'PASS / PUNCH', 'K'],
-    ['SPECIAL', 'L (when RIOT meter is full)', 'PAUSE · MUTE', 'P · M'],
+    ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K'],
+    ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K while jumping'],
+    ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
   ];
   ctx.fillStyle = 'rgba(12,8,28,0.8)';
-  roundRect(ctx, VIEW_W / 2 - 360, y, 720, 100, 10);
+  roundRect(ctx, VIEW_W / 2 - 360, y, 720, 118, 10);
   ctx.fill();
   lines.forEach((l, i) => {
-    const yy = y + 28 + i * 27;
+    const yy = y + 25 + i * 25;
     text(ctx, l[0], VIEW_W / 2 - 340, yy, 'bold 13px "Trebuchet MS", sans-serif', '#ffe14a', 'left');
     text(ctx, l[1], VIEW_W / 2 - 220, yy, '13px "Trebuchet MS", sans-serif', '#ffffff', 'left');
     text(ctx, l[2], VIEW_W / 2 + 140, yy, 'bold 13px "Trebuchet MS", sans-serif', '#ffe14a', 'left');
     text(ctx, l[3], VIEW_W / 2 + 270, yy, '13px "Trebuchet MS", sans-serif', '#ffffff', 'left');
   });
-  text(ctx, 'Gamepad: stick move · A shoot · X pass/punch · B special · RB sprint · Start pause', VIEW_W / 2, y + 116, '12px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3);
+  text(ctx, 'Gamepad: stick move · A shoot · X pass / punch / tackle · B dodge / special · RB sprint · Start pause', VIEW_W / 2, y + 133, '12px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3);
 }
 
 function drawPause(ctx: CanvasRenderingContext2D) {
   text(ctx, 'PAUSED', VIEW_W / 2, 140, 'italic 900 64px "Trebuchet MS", sans-serif', '#ffe14a', 'center', 10);
   text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 180, 'bold 16px "Trebuchet MS", sans-serif', '#ffffff', 'center', 4);
   drawControls(ctx, 230);
-  text(ctx, 'TIPS: sprint at the rim to dunk · 3 quick hits knock a player down · jump to block shots · K without the ball calls for a pass',
-    VIEW_W / 2, 390, '12px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3);
+  const tips = [
+    'A jab only staggers. To take the ball: land 3 jabs, tackle, or hit someone in the air.',
+    'Sprint at the rim and shoot to dunk. Jump at the rim without the ball and your teammate throws a lob.',
+    'Pass (K) when your teammate jumps at the rim for an alley-oop. P / M: pause / mute.',
+  ];
+  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 410 + i * 20, '13px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3));
 }
 
 function drawResults(ctx: CanvasRenderingContext2D) {

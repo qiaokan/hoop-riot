@@ -51,8 +51,19 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     ctx.rotate(-p.facing * Math.PI / 2 * Math.min(1, p.t * 6));
   } else if (p.state === 'stun') {
     ctx.rotate(-p.facing * 0.22);
+  } else if (p.state === 'tackle') {
+    ctx.translate(0, -12);
+    ctx.rotate(p.facing * 1.15);
+  } else if (p.state === 'airkick') {
+    ctx.rotate(-p.facing * 0.4);
   }
-  ctx.scale(p.facing, 1);
+  if (p.state === 'spin') {
+    // Whirl: flip the figure back and forth quickly.
+    const c = Math.cos(p.t * 36);
+    ctx.scale(p.facing * (Math.abs(c) < 0.25 ? (c < 0 ? -0.25 : 0.25) : c), 1);
+  } else {
+    ctx.scale(p.facing, 1);
+  }
   if (p.invuln > 0 && Math.floor(time * 20) % 2 === 0) ctx.globalAlpha = 0.45;
 
   const skin = d.skin;
@@ -85,6 +96,17 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
       break;
     case 'stun':
       armF = -0.6; armB = 0.9;
+      break;
+    case 'tackle':
+      armF = 2.6; armB = 2.3; elbowF = 0; elbowB = 0;
+      legF = -0.5; legB = -0.9; kneeF = 0; kneeB = 0;
+      break;
+    case 'airkick':
+      legF = 1.5; kneeF = 0; legB = -0.4; kneeB = -1.4;
+      armF = -0.9; armB = 1.1;
+      break;
+    case 'spin':
+      armF = 1.5; armB = -1.5; elbowF = 0; elbowB = 0;
       break;
     case 'down':
       armF = 1.4; armB = 2; legF = 0.2; legB = -0.2;

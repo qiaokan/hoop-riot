@@ -1,4 +1,4 @@
-import { COURT, HOOP, JUMP_V, TeamId } from '../core/constants';
+import { COURT, GRAVITY, HOOP, TeamId } from '../core/constants';
 import type { Game, GameEvent } from '../core/game';
 import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './background';
 import { drawBall, drawHoopBack, drawHoopFront, drawPlayer, drawShadow, roundRect } from './sprites';
@@ -94,7 +94,27 @@ export class Renderer {
         this.ring(e, '#ffe14a');
         this.shake = Math.max(this.shake, 12);
         this.flash = 0.35;
-        this.showBanner('SLAM DUNK!', '#ff6a26');
+        this.showBanner(e.text ?? 'SLAM DUNK!', e.points === 3 ? '#ffe14a' : '#ff6a26', e.points === 3 ? '3 POINTS' : undefined);
+        break;
+      case 'megaslam':
+        this.flash = 0.5;
+        this.ring(e, '#ffe14a');
+        this.showBanner(e.text ?? 'MEGA SLAM!', '#ffe14a', game.teams[e.team ?? 0].name.toUpperCase());
+        break;
+      case 'blitz':
+        this.flash = 0.35;
+        this.ring(e, '#ff4fa3');
+        this.showBanner(e.text ?? 'BLITZ!', '#ff4fa3');
+        break;
+      case 'tackle':
+        this.burst({ ...e, y: 4 }, 7, 'rgba(200,200,210,0.7)', 'dust', 110);
+        break;
+      case 'spin':
+        this.burst({ ...e, y: 4 }, 6, 'rgba(160,230,255,0.8)', 'dust', 90);
+        this.ring({ ...e, y: 4 }, 'rgba(160,230,255,0.9)');
+        break;
+      case 'oop':
+        this.popup('LOB!', e, '#ffe14a', 16);
         break;
       case 'block':
         this.burst(e, 12, '#9ef0ff', 'spark', 240);
@@ -103,7 +123,7 @@ export class Renderer {
         break;
       case 'steal':
       case 'fumble':
-        if (e.text) this.popup(e.text, e, teamColor(e.team), 15);
+        if (e.text) this.popup(e.text, { ...e, y: e.y + 34 }, teamColor(e.team), 15);
         break;
       case 'catch':
         if (e.text) this.popup(e.text, e, '#ffffff', 14);
@@ -218,18 +238,26 @@ export class Renderer {
     drawHoopFront(ctx, HOOP.leftX, camX, this.netSway[0], game.time);
     drawHoopFront(ctx, HOOP.rightX, camX, this.netSway[1], game.time);
 
-    // Release-timing meter for the human's jump shot: fills as the jump nears its apex.
+    // Release-timing bar for the human's jump shot. The marker sweeps left to right over the
+    // jump; the green zone in the middle is the sure-make window and shrinks under pressure.
     if (humanId !== null) {
       const h = game.players[humanId];
       if (h.state === 'shoot' && !h.released && b.holder === h.id) {
-        const q = 1 - Math.min(1, Math.abs(h.vy) / JUMP_V);
-        const mx = h.x - camX + 22, my = sy(h.z, h.y) - 70;
-        ctx.fillStyle = 'rgba(12,8,28,0.85)';
-        ctx.fillRect(mx - 1, my - 1, 8, 42);
-        ctx.fillStyle = q > 0.85 ? '#7dff6a' : q > 0.6 ? '#ffe14a' : '#ff5a5a';
-        ctx.fillRect(mx, my + 40 * (1 - q), 6, 40 * q);
+        const tA = game.apexTime(h);
+        const W = game.shotWindow(h);
+        const off = Math.abs(h.vy) / GRAVITY;
+        const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
+        const bw = 64, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 130;
+        const zone = Math.max(2, (W / tA) * bw);
+        const inZone = off <= W;
+        ctx.fillStyle = 'rgba(12,8,28,0.9)';
+        ctx.fillRect(bx - 2, by - 2, bw + 4, 12);
+        ctx.fillStyle = '#5a2030';
+        ctx.fillRect(bx, by, bw, 8);
+        ctx.fillStyle = inZone ? '#b6ff9a' : '#3fbf5a';
+        ctx.fillRect(bx + bw / 2 - zone / 2, by, zone, 8);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(mx - 2, my + 40 * 0.15 - 1, 10, 2);
+        ctx.fillRect(bx + pos * bw - 1.5, by - 3, 3, 14);
       }
     }
 

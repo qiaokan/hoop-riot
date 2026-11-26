@@ -6,6 +6,10 @@ export interface PlayerDef {
   shoot: number;
   power: number;
   jump: number;
+  /** Full-meter move with the ball: Comet Shot (cannot miss) or Mega Slam (flying 3-point dunk). */
+  special: 'comet' | 'slam';
+  /** Full-meter move without the ball: Shockwave (floors everyone nearby) or Blitz (homing tackle). */
+  defSpecial: 'shockwave' | 'blitz';
   skin: string;
   hair: string;
   hairStyle: 'spiky' | 'flat' | 'afro' | 'mohawk' | 'bald' | 'bun';
@@ -30,8 +34,8 @@ export const HOME_TEAM: TeamDef = {
   trim: '#ffd23f',
   shorts: '#1b3f8f',
   players: [
-    { name: 'Dash', num: 7, speed: 0.75, shoot: 0.7, power: 0.55, jump: 0.7, skin: '#e9b48a', hair: '#2a1a12', hairStyle: 'spiky', build: 1 },
-    { name: 'Mo', num: 23, speed: 0.5, shoot: 0.5, power: 0.85, jump: 0.6, skin: '#8d5a3b', hair: '#111111', hairStyle: 'flat', build: 1.15 },
+    { name: 'Dash', num: 7, speed: 0.75, shoot: 0.7, power: 0.55, jump: 0.7, special: 'comet', defSpecial: 'blitz', skin: '#e9b48a', hair: '#2a1a12', hairStyle: 'spiky', build: 1 },
+    { name: 'Mo', num: 23, speed: 0.5, shoot: 0.5, power: 0.85, jump: 0.6, special: 'slam', defSpecial: 'shockwave', skin: '#8d5a3b', hair: '#111111', hairStyle: 'flat', build: 1.15 },
   ],
 };
 
@@ -52,8 +56,8 @@ export const OPPONENTS: Opponent[] = [
       trim: '#fff1d6',
       shorts: '#7a2f12',
       players: [
-        { name: 'Rusty', num: 4, speed: 0.4, shoot: 0.4, power: 0.7, jump: 0.45, skin: '#f0c19c', hair: '#b5532a', hairStyle: 'bald', build: 1.12 },
-        { name: 'Pike', num: 11, speed: 0.5, shoot: 0.45, power: 0.55, jump: 0.5, skin: '#c98e62', hair: '#3b2a1e', hairStyle: 'flat', build: 1 },
+        { name: 'Rusty', num: 4, speed: 0.4, shoot: 0.4, power: 0.7, jump: 0.45, special: 'slam', defSpecial: 'shockwave', skin: '#f0c19c', hair: '#b5532a', hairStyle: 'bald', build: 1.12 },
+        { name: 'Pike', num: 11, speed: 0.5, shoot: 0.45, power: 0.55, jump: 0.5, special: 'comet', defSpecial: 'blitz', skin: '#c98e62', hair: '#3b2a1e', hairStyle: 'flat', build: 1 },
       ],
     },
   },
@@ -67,8 +71,8 @@ export const OPPONENTS: Opponent[] = [
       trim: '#151515',
       shorts: '#0d5e39',
       players: [
-        { name: 'Jinx', num: 3, speed: 0.8, shoot: 0.65, power: 0.45, jump: 0.75, skin: '#f2c9a5', hair: '#ff3fa4', hairStyle: 'mohawk', build: 0.95 },
-        { name: 'Volt', num: 9, speed: 0.65, shoot: 0.6, power: 0.6, jump: 0.65, skin: '#6e4630', hair: '#f5e663', hairStyle: 'afro', build: 1.02 },
+        { name: 'Jinx', num: 3, speed: 0.8, shoot: 0.65, power: 0.45, jump: 0.75, special: 'comet', defSpecial: 'blitz', skin: '#f2c9a5', hair: '#ff3fa4', hairStyle: 'mohawk', build: 0.95 },
+        { name: 'Volt', num: 9, speed: 0.65, shoot: 0.6, power: 0.6, jump: 0.65, special: 'slam', defSpecial: 'shockwave', skin: '#6e4630', hair: '#f5e663', hairStyle: 'afro', build: 1.02 },
       ],
     },
   },
@@ -82,8 +86,8 @@ export const OPPONENTS: Opponent[] = [
       trim: '#e8c66a',
       shorts: '#3e2479',
       players: [
-        { name: 'Rex', num: 1, speed: 0.75, shoot: 0.8, power: 0.75, jump: 0.8, skin: '#d9a07a', hair: '#d8d8d8', hairStyle: 'bun', build: 1.05 },
-        { name: 'Tank', num: 50, speed: 0.55, shoot: 0.55, power: 0.95, jump: 0.7, skin: '#5b3a28', hair: '#111111', hairStyle: 'bald', build: 1.2 },
+        { name: 'Rex', num: 1, speed: 0.75, shoot: 0.8, power: 0.75, jump: 0.8, special: 'comet', defSpecial: 'blitz', skin: '#d9a07a', hair: '#d8d8d8', hairStyle: 'bun', build: 1.05 },
+        { name: 'Tank', num: 50, speed: 0.55, shoot: 0.55, power: 0.95, jump: 0.7, special: 'slam', defSpecial: 'shockwave', skin: '#5b3a28', hair: '#111111', hairStyle: 'bald', build: 1.2 },
       ],
     },
   },
