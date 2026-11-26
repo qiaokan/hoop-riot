@@ -35,7 +35,7 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 14 · balance pass, fairer grabs';
+const VERSION = 'build 15 · ball spin, limp-body knockdowns, rolling items';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -505,6 +505,38 @@ function drawChampion(ctx: CanvasRenderingContext2D, t: number) {
   },
   /** Advance the simulation by n fixed steps using live input + AI (for automated testing). */
   advance(n: number) { for (let i = 0; i < n; i++) stepSim(); },
+  /**
+   * Film strip (dev only): steps the game frame by frame, drawing each one at exactly 1/60 s, and
+   * pastes every `every`-th frame, cropped around a player or the ball, into one sheet laid over
+   * the page. Motion can then be judged from a single still.
+   */
+  film(o: { frames: number; every?: number; pid?: number; ball?: boolean; at?: { x: number; y: number; z: number }; w?: number; h?: number; cols?: number; up?: number }) {
+    const every = o.every ?? 3, w = o.w ?? 150, h = o.h ?? 150, cols = o.cols ?? 8;
+    const shots = Math.ceil(o.frames / every);
+    let cv = document.getElementById('film') as HTMLCanvasElement | null;
+    if (!cv) {
+      cv = document.createElement('canvas');
+      cv.id = 'film';
+      cv.style.cssText = 'position:fixed;left:0;top:0;z-index:9;background:#1c2233;width:100%';
+      document.body.appendChild(cv);
+    }
+    cv.width = cols * w; cv.height = Math.ceil(shots / cols) * h;
+    const c = cv.getContext('2d')!;
+    const k = canvas.width / 960;
+    for (let f = 0; f < o.frames; f++) {
+      stepSim();
+      renderer.render(game, DT, [], { hud: false, dim: 0 });
+      if (f % every) continue;
+      const t = o.at ?? (o.ball ? game.ball : game.players[o.pid ?? 0]);
+      const cx = t.x - renderer.camX, cy = 236 + t.z * 0.7 - t.y - (o.up ?? 45);
+      const i = f / every, dx = (i % cols) * w, dy = Math.floor(i / cols) * h;
+      c.drawImage(canvas, (cx - w / 2) * k, (cy - h / 2) * k, w * k, h * k, dx, dy, w, h);
+      c.strokeStyle = '#445'; c.strokeRect(dx + 0.5, dy + 0.5, w - 1, h - 1);
+      c.fillStyle = '#fff'; c.font = '11px sans-serif'; c.fillText(String(f), dx + 4, dy + 12);
+    }
+  },
+  /** Removes the film strip. */
+  unfilm() { document.getElementById('film')?.remove(); },
   /** Jump to a scene (for automated screenshots). */
   show(s: Scene) { if (s === 'upgrade') openUpgrades(); else scene = s; },
   finish: onMatchOver,

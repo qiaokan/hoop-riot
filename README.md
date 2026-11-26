@@ -150,7 +150,20 @@ The Rooftop (launch pads, a skateboard, every item; low gravity, rain, giant bal
 
 Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Springs, Heavy Hands. Losing a game lets you retry it.
 
-**Debug/testing URL params:** `?autoplay=1` (CPU vs CPU), `?speed=4`, `?seed=N`, `?mute=1`, `?mode=tour|quick|coop|versus`, `?opp=0..3`. In the console, `__hoop.start('quick', 2)` starts a match and `__hoop.advance(n)` steps the simulation.
+**Debug/testing URL params:** `?autoplay=1` (CPU vs CPU), `?speed=4`, `?seed=N`, `?mute=1`, `?mode=tour|quick|coop|versus`, `?opp=0..3`. In the console, `__hoop.start('quick', 2)` starts a match and `__hoop.advance(n)` steps the simulation. `__hoop.film({ frames: 96, every: 4, pid: 0 })` steps the game frame by frame and lays every fourth frame, cropped around that player (or `ball: true`), into one contact sheet over the page, so a move can be judged from a single still; `__hoop.unfilm()` removes it.
+
+## Physics
+
+Everything on the court is stepped by the same fixed-step simulation, and each rule below has a test in `tests/physics.test.ts`.
+
+- **The ball spins.** It has a real angular velocity. A jump shot leaves the hand with backspin, a pass with a little, a ball knocked loose tumbles forward.
+- **Surfaces grip it.** On the floor, the rim and the glass, friction acts on the slip between the ball's surface and what it touches, trading speed for spin. Backspin brakes a bounce (enough of it brings the ball back), topspin drives it on, and backspin off the backboard sends the ball down toward the rim.
+- **It rolls.** A ball on the floor skids until it is truly rolling, then rolling resistance stops it. A wet floor lets it skid much further.
+- **The net is a cloth.** The ball pushes its way through; a swish snaps the net down and it whips back. (Drawn only: it does not change the result.)
+- **Bodies have mass.** Bigger builds and stronger players weigh more. The same blow throws a heavy player less far, and when two bodies push into each other the lighter one gives more ground.
+- **Knockdowns tumble.** Every knocked-down body turns head over heels in the air, lands on its back or its face depending on how the tumble ended, and slides to a real stop.
+- **Items are objects.** A throw that misses bounces off the floor or fence and rolls or scrapes to a stop, where it can be picked up again. Cans, bombs and extinguishers roll a long way; boxes and tools stop short and settle on a flat side. A thrown crate smashes when it lands. With your hands full, running into an item kicks it along the floor. A dropped item keeps some of its carrier's motion.
+- **Low gravity** stretches a shot's flight time, so the arc keeps its shape.
 
 ## Architecture
 
@@ -161,7 +174,8 @@ Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Sp
   - `teams.ts`: teams, courts and upgrades.
 - `src/client/`:
   - `render.ts`: Canvas 2D renderer: camera, zoom and slow motion, particles, HUD.
-  - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash) with wind-up and follow-through, and the drawn pose eases toward it. Also faces, outlines and the hit flash.
+  - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash). Feet and hips ease straight to it; arms, lean and head ride springs, so they overshoot and settle. Setting off and stopping throw the head and chest back and forward. A knocked-down body goes limp: its arms and legs are pendulums swung by the tumble and stopped by the floor. Also faces, outlines and the hit flash.
+  - `net.ts`: the nets, as small cloths the ball pushes through.
   - `sprites.ts`: ball, hoops, pads.
   - `toysprites.ts`: items, vehicles, the car, dogs, wrecking ball, bumpers and saucer.
   - `background.ts`: five court themes painted from palettes.
@@ -170,6 +184,8 @@ Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Sp
 - `src/main.ts`: menus, modes, player switching, tournament flow.
 - `tests/sim.test.ts`: full computer-vs-computer matches on every court, plus one test per mechanic.
 - `tests/toys.test.ts`: one test per item, hazard, event and ride, plus full matches on all five courts with everything switched on.
+- `tests/physics.test.ts`: ball spin and friction, rolling, body mass and tumbling, loose items.
+- `tests/grab.test.ts`: what a person chasing the ball carrier gets out of grabs, and the ways out of one.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
 
 ## Balance meter
@@ -192,7 +208,8 @@ The meter only knows how the computer plays. It says nothing about how the game 
 ## Roadmap (proposed)
 
 1. **Tuning from real play:** everything so far is tuned against the balance meter (below), which only knows how the computer plays. How it feels with a person at the keys is still unjudged.
-2. **Engine and rotor sounds, more animation** for the vehicles and the new item moves.
-3. **Court picker** for Quick Match, and a way to switch toys off.
-4. **Online play** using the deterministic core with rollback.
-5. **Sprite sheets:** bake the code-drawn characters into frame-by-frame animation with smear frames.
+2. **Engine and rotor sounds, more animation** for the vehicles and the new item moves. The vehicles, car, dogs and saucer are still drawn as they were.
+3. **Curving shots** (spin bending the ball's flight) and the ball bouncing off items on the floor.
+4. **Court picker** for Quick Match, and a way to switch toys off.
+5. **Online play** using the deterministic core with rollback.
+6. **Sprite sheets:** bake the code-drawn characters into frame-by-frame animation with smear frames.

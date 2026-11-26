@@ -39,6 +39,20 @@ export interface Ride {
   homeX: number; homeZ: number;
 }
 
+/** How each item behaves as a loose object: how much it bounces, how fast the floor stops it (units/s²), and whether it rolls. */
+export const BODY: Record<ItemKind, { bounce: number; drag: number; rolls: boolean }> = {
+  can: { bounce: 0.45, drag: 150, rolls: true },
+  cone: { bounce: 0.4, drag: 420, rolls: false },
+  crate: { bounce: 0.2, drag: 700, rolls: false },
+  bomb: { bounce: 0.35, drag: 190, rolls: true },
+  bat: { bounce: 0.3, drag: 480, rolls: false },
+  banana: { bounce: 0.1, drag: 600, rolls: false },
+  hammer: { bounce: 0.15, drag: 800, rolls: false },
+  ext: { bounce: 0.3, drag: 260, rolls: true },
+  magnet: { bounce: 0.2, drag: 600, rolls: false },
+  shoes: { bounce: 0.25, drag: 600, rolls: false },
+};
+
 export interface Traffic { kind: 'car' | 'dogs'; lane: number; dir: 1 | -1; x: number; warn: number }
 export interface Shell { x: number; y: number; z: number; vx: number; team: TeamId; left: number }
 export interface Ufo { x: number; z: number; victim: number | null; phase: 'hunt' | 'lift' | 'carry'; tx: number; tz: number; cd: number }
@@ -174,10 +188,9 @@ export class Toys {
         it.y = h.y + HAND_Y + 6;
         it.z = h.z + 1;
       } else if (it.state === 'ground') {
+        this.moveLoose(it);
         if (it.y > 0) {
-          it.vy -= g.grav * DT;
-          it.y += it.vy * DT;
-          if (it.y <= 0) { it.y = 0; it.vy = 0; g.emit('bounce', it.x, 0, it.z); }
+          // still in the air
         } else if (it.armed) {
           // A banana on the floor: whoever runs over it goes sliding.
           for (const p of g.players) {
@@ -191,8 +204,15 @@ export class Toys {
             // Magnets and spring shoes are worn, so even the ball carrier can take them.
             if (it.kind === 'magnet') { p.magnetT = 9; gone.add(it); }
             else if (it.kind === 'shoes') { p.springT = 10; gone.add(it); }
-            else if (g.ball.holder === p.id || g.heldItem(p)) continue;
-            else {
+            else if (g.ball.holder === p.id || g.heldItem(p)) {
+              // Hands full: running into it kicks it along the floor instead.
+              const sp = Math.hypot(p.vx, p.vz);
+              if (sp > 110 && dist(p.x, p.z, it.x, it.z) < 17 && Math.hypot(it.vx, it.vz) < sp * 0.8) {
+                it.vx = p.vx * 1.25; it.vz = p.vz * 1.25; it.vy = 70; it.y = 0.5;
+                g.emit('bounce', it.x, 0, it.z);
+              }
+              continue;
+            } else {
               it.state = 'held'; it.holder = p.id; it.team = p.team;
               if (it.kind === 'bomb') it.fuse = 3.5;
             }
@@ -201,7 +221,7 @@ export class Toys {
           }
         }
       } else {
-        it.spin += DT * 16;
+        it.spin += DT * 16 * (Math.sign(it.vx) || 1);
         it.vy -= 500 * DT;
         it.x += it.vx * DT;
         it.y += it.vy * DT;
@@ -229,15 +249,64 @@ export class Toys {
             g.emit('itemhit', it.x, it.y, it.z);
           }
         } else if (it.y <= 0 || it.x < COURT.minX - 20 || it.x > COURT.maxX + 20) {
+          const wall = it.y > 0;
           if (it.kind === 'bomb') { gone.add(it); this.blast(it.x, Math.max(0, it.y), it.z, 105, it.team, it); }
           else if (it.kind === 'banana') {
             it.state = 'ground'; it.armed = true; it.y = 0; it.vx = it.vy = it.vz = 0; it.spin = 0;
             it.x = clamp(it.x, COURT.minX, COURT.maxX);
-          } else { gone.add(it); g.emit('itemhit', it.x, Math.max(4, it.y), it.z); }
+          } else if (it.kind === 'crate' && Math.hypot(it.vx, it.vy) > 380) {
+            // A crate that lands hard smashes to pieces.
+            gone.add(it); g.emit('itemhit', it.x, Math.max(4, it.y), it.z, { text: 'crate', power: 2 });
+          } else {
+            // A miss is not the end of it: it bounces off the fence or the floor and comes to rest, to be picked up again.
+            const B = BODY[it.kind];
+            if (wall) { it.x = clamp(it.x, COURT.minX - 20, COURT.maxX + 20); it.vx = -it.vx * B.bounce; }
+            else { it.y = 0; it.vy = -it.vy * B.bounce; it.vx *= 0.7; it.vz *= 0.7; }
+            g.emit('bounce', it.x, 0, it.z);
+            // Once it has lost its pace it is just an object on the floor, and belongs to nobody.
+            if (Math.hypot(it.vx, it.vz) < 330) { it.state = 'ground'; it.team = null; }
+          }
         }
       }
     }
     if (gone.size) g.items = g.items.filter((i) => !gone.has(i));
+  }
+
+  /**
+   * An item loose on the court: it falls, bounces, slides or rolls to a stop and bounces off the fences.
+   * Round things roll a long way; boxes and tools scrape to a halt.
+   */
+  private moveLoose(it: Item) {
+    const g = this.g, B = BODY[it.kind];
+    if (it.y > 0 || it.vy > 0) {
+      it.vy -= g.grav * DT;
+      it.y += it.vy * DT;
+      if (it.y <= 0) {
+        it.y = 0;
+        if (it.vy < -120) { g.emit('bounce', it.x, 0, it.z); it.vy = -it.vy * B.bounce; it.vx *= 0.8; it.vz *= 0.8; }
+        else it.vy = 0;
+      }
+    }
+    const v = Math.hypot(it.vx, it.vz);
+    // At rest, a box or a tool settles onto a flat side; a round thing stays as it stopped.
+    if (v === 0 && it.y <= 0 && !B.rolls && it.spin !== 0) {
+      const flat = Math.round(it.spin / (Math.PI / 2)) * (Math.PI / 2);
+      it.spin = Math.abs(flat - it.spin) < 0.01 ? flat : it.spin + (flat - it.spin) * 0.25;
+    }
+    if (v > 0) {
+      if (it.y <= 0) {
+        const dec = B.drag * (g.slip ? 0.3 : 1) * DT;
+        if (v <= dec) { it.vx = it.vz = 0; }
+        else { it.vx *= (v - dec) / v; it.vz *= (v - dec) / v; }
+      }
+      it.x += it.vx * DT; it.z += it.vz * DT;
+      // Rolling things turn with the distance covered; the rest tumble while airborne and scrape flat.
+      it.spin += (B.rolls || it.y > 0 ? it.vx * DT : 0) / 9;
+      if (it.x < COURT.minX) { it.x = COURT.minX; it.vx = Math.abs(it.vx) * B.bounce; }
+      if (it.x > COURT.maxX) { it.x = COURT.maxX; it.vx = -Math.abs(it.vx) * B.bounce; }
+      if (it.z < COURT.minZ) { it.z = COURT.minZ; it.vz = Math.abs(it.vz) * B.bounce; }
+      if (it.z > COURT.maxZ) { it.z = COURT.maxZ; it.vz = -Math.abs(it.vz) * B.bounce; }
+    }
   }
 
   /** The action button while carrying an item: swing it, slam it, spray it, or throw it. */

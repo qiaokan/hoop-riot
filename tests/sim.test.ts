@@ -491,12 +491,13 @@ describe('mechanics', () => {
     run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
     expect(me.state).toBe('held');
     const x0 = me.x;
-    let knees = 0, liftTop = 0, spun = 0, slam3 = false, hurl = false, downFrames = 0, lastRot = 0;
+    let knees = 0, liftTop = 0, spun = 0, slam3 = false, hurl = false, downFrames = 0, lastRot = 0, fumbled = false;
     // The press waits out the clinch (the victim's window to break free), then throws at once.
     run(game, 200, (f) => ({ 2: { mx: f < 30 ? 1 : 0, action: f === 20 } }), () => {
       for (const e of game.drainEvents()) {
         if (e.type === 'hit') knees++;
         if (e.type === 'hurl') hurl = true;
+        if (e.type === 'fumble') fumbled = true;
         if (e.type === 'slam' && e.power === 3) slam3 = true;
       }
       if (me.state === 'held') liftTop = Math.max(liftTop, me.y);
@@ -511,7 +512,7 @@ describe('mechanics', () => {
     expect(slam3).toBe(true); // lands as a heavy slam
     expect(me.x).toBeGreaterThan(x0 + 120);
     expect(downFrames).toBeGreaterThan(100); // stays down longer than a normal knockdown
-    expect(game.ball.holder).not.toBe(0);
+    expect(fumbled).toBe(true); // and the ball came loose
   });
 
   it('play does not stop for a basket: the ball is live and the other team can take it', () => {

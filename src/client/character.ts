@@ -60,6 +60,24 @@ interface Anim {
   lastFacing: number;
   /** Seconds left of the squash when turning around. */
   turnT: number;
+  /** Speed of each pose value, for the ones that move on springs (arms, lean, head). */
+  vel: Partial<Record<keyof Pose, number>>;
+  /** Limp limbs while knocked down. */
+  rag: Rag | null;
+  /** The body's velocity last frame, to feel its acceleration. */
+  pvx: number; pvy: number;
+  /** How far the head and torso are thrown back or forward by that acceleration (a spring). */
+  sway: number; swayV: number;
+}
+
+/**
+ * A knocked-down body is limp: each arm and leg is a pendulum hanging from the shoulder or hip,
+ * swung about by the body's own tumbling and by hitting the floor. Angles are on screen, measured
+ * from straight down (positive toward the right).
+ */
+interface Rag {
+  th: [number, number, number, number]; // front arm, back arm, front leg, back leg
+  w: [number, number, number, number];
 }
 const anims = new Map<number, Anim>();
 
@@ -78,6 +96,76 @@ const HX = 1, HR = 15;
 const LEG = 13.2, HIP = 27.5, ANKLE = 3.5;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const clampN = (v: number, m: number) => (v < -m ? -m : v > m ? m : v);
+/** Pose values that move on springs. */
+const SPRUNG = new Set<keyof Pose>(['armF', 'armB', 'elbowF', 'elbowB', 'lean', 'head']);
+/** Height of the body's middle above its feet, in figure units: a tumbling body turns about it. */
+const PIVOT = 44;
+/** Limb lengths for the limp-body pendulums (figure units), and where each hangs from along the body (up is positive). */
+const RAG_L = [20, 20, 25, 25];
+const RAG_AT = [21, 21, -16, -16];
+
+/** One step of the limp limbs: gravity, the body's own acceleration and spin, and the floor. */
+function ragStep(r: Rag, p: Player, dt: number, ax: number, ay: number) {
+  if (dt <= 0) return;
+  const G = 1700;
+  const air = p.y > 0.5;
+  const rot = p.rot;
+  const spin = air ? p.spinRate : 0;
+  // What the limbs feel is gravity less the body's own acceleration: in free fall, nothing at all.
+  const gx0 = -ax, gy0 = (air ? 0 : G) - (air ? 0 : clampN(ay, 3000));
+  // Height of the body's middle above the floor (it sinks to the floor as the body tips over flat).
+  const mid = p.y / S + PIVOT - (PIVOT - 12) * Math.sin(rot) * Math.sin(rot) * clamp01(1 - p.y / 36);
+  const n = 3, h = dt / n;
+  for (let i = 0; i < 4; i++) {
+    const L = RAG_L[i], at = RAG_AT[i];
+    // Spinning flings the limbs outward along the body: shoulders one way, hips the other.
+    const gx = gx0 + spin * spin * at * S * Math.sin(rot);
+    const gy = gy0 - spin * spin * at * S * Math.cos(rot);
+    const pivotH = mid + at * Math.cos(rot);
+    for (let k = 0; k < n; k++) {
+      const th = r.th[i];
+      const acc = (gx * Math.cos(th) - gy * Math.sin(th)) / (L * S) - (air ? 2.2 : 7) * r.w[i];
+      r.w[i] = clampN(r.w[i] + acc * h, 40);
+      r.th[i] += r.w[i] * h;
+      // The floor: a limb cannot hang lower than it.
+      const room = (pivotH - 3) / L;
+      if (room < 1 && Math.cos(r.th[i]) > room) {
+        const lim = Math.acos(Math.max(-1, room));
+        const t = Math.atan2(Math.sin(r.th[i]), Math.cos(r.th[i]));
+        const side = Math.abs(t) > 0.05 ? Math.sign(t) : (i % 2 === 0 ? 1 : -1) * (i < 2 ? 1 : -1);
+        r.th[i] += side * lim - t;
+        r.w[i] *= -0.25;
+      }
+    }
+  }
+}
+
+/** Turns the limp limbs into a pose in the figure's own frame (which is turned by the body's tumble and flipped by its facing). */
+function ragPose(r: Rag, p: Player, P: Pose) {
+  const f = p.facing;
+  const local = (th: number) => { const a = f * (th + p.rot); return Math.atan2(Math.sin(a), Math.cos(a)); };
+  const aF = local(r.th[0]), aB = local(r.th[1]);
+  // Legs cannot fold up behind the back: keep them within what a hip allows.
+  const lF = clampN(local(r.th[2]) - 0.15, 1.5) + 0.15, lB = clampN(local(r.th[3]) + 0.1, 1.5) - 0.1;
+  P.armF = aF; P.armB = aB;
+  // At rest on the floor nothing lies dead straight: on the back, one knee comes up and the elbows
+  // fold toward the sky; face down, the elbows fold up behind instead.
+  const rest = p.y > 0.5 ? 0 : clamp01((p.t - 0.3) / 0.25);
+  const faceUp = f * Math.sin(p.rot) < 0;
+  const fold = faceUp ? 1 : -1;
+  P.elbowF = fold * (0.25 + Math.min(0.9, Math.abs(r.w[0]) * 0.05) + 0.85 * rest);
+  P.elbowB = fold * (0.25 + Math.min(0.9, Math.abs(r.w[1]) * 0.05) + 0.4 * rest);
+  // A leg swinging fast bends at the knee.
+  const reach = (w: number, up: number) => LEG * 2 * (0.96 - Math.min(0.3, Math.abs(w) * 0.02) - up);
+  const lf = reach(r.w[2], faceUp ? 0.3 * rest : 0), lb = reach(r.w[3], 0);
+  P.hipH = HIP; P.hipX = 0;
+  P.fFx = 3 + Math.sin(lF) * lf; P.fFy = HIP - Math.cos(lF) * lf - ANKLE;
+  P.fBx = -3 + Math.sin(lB) * lb; P.fBy = HIP - Math.cos(lB) * lb - ANKLE;
+  P.lean = 0; P.rot = 0; P.rotY = 0; P.sx = 1; P.sy = 1; P.hop = 0;
+  // The head lolls against the spin.
+  P.head = clampN(-f * (p.y > 0.5 ? p.spinRate : 0) * 0.045, 0.5);
+}
 
 function shade(hex: string, k: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -245,30 +333,13 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       break;
     }
     case 'down': {
-      rate = 60;
-      const upAt = p.downFor - 0.28;
-      if (p.thrown) {
-        // Thrown: tumbling through the air. The spin itself comes from the body's rotation.
-        P.armF = 2.4 + Math.sin(time * 20) * 0.5; P.armB = 2.7 - Math.sin(time * 20) * 0.5; P.elbowF = 0.2; P.elbowB = 0.2;
-        P.fFx = 7; P.fFy = 7; P.fBx = -6; P.fBy = 5; P.lean = -0.1;
-      } else if (t < 0.3) {
-        // Knocked backward, limbs flung out.
-        const u = t / 0.3;
-        P.rot = -(Math.PI / 2) * Math.min(1, u * 1.25); P.rotY = 10 + Math.sin(u * Math.PI) * 12;
-        P.armF = -2.2; P.armB = -2.6; P.elbowF = 0.2; P.elbowB = 0.2;
-        P.fFx = 8; P.fFy = 8; P.fBx = 2; P.fBy = 5;
-      } else if (t < upAt) {
-        // Flat on the back, with a small bounce on impact.
-        P.rot = -Math.PI / 2; P.rotY = 9 + (t < 0.42 ? Math.sin(((t - 0.3) / 0.12) * Math.PI) * 4 : 0);
-        P.armF = -2.5; P.elbowF = 0.2; P.armB = -1.2; P.elbowB = 0.4;
-        P.fFx = 6; P.fFy = 3; P.fBx = -4;
-      } else {
-        // Pushing back up.
-        const u = clamp01((t - upAt) / 0.28);
-        P.rot = -(Math.PI / 2) * (1 - u); P.rotY = 9 * (1 - u);
-        P.hipH = HIP - 7 + 7 * u; P.lean = 0.5 * (1 - u); P.head = 0.3 * (1 - u);
-        P.armF = 0.6; P.armB = 0.3; P.fFx = 7; P.fBx = -6;
-      }
+      // Flying and lying are limp-limb physics (see ragStep). What is posed is the push back up:
+      // the body's turn unwinds while the legs fold under and the arms push off the floor.
+      rate = 30;
+      const u = clamp01((t - (p.downFor - 0.28)) / 0.28);
+      P.hipH = HIP - 9 + 9 * u; P.lean = 0.55 * (1 - u); P.head = 0.3 * (1 - u);
+      P.armF = 0.7 - 0.4 * u; P.armB = 0.4 - 0.4 * u; P.elbowF = 0.9 * (1 - u) + 0.3; P.elbowB = 0.9 * (1 - u) + 0.3;
+      P.fFx = 8; P.fBx = -6;
       break;
     }
     case 'tackle':
@@ -422,11 +493,16 @@ function leg(ctx: CanvasRenderingContext2D, hx: number, hy: number, fx: number, 
   let nx = dy / dist, ny = -dx / dist;
   if (nx < 0) { nx = -nx; ny = -ny; }
   const kx = hx + dx / 2 + nx * h, ky = hy + dy / 2 + ny * h;
-  strokePath(ctx, [hx, hy, kx, ky, fx, fy], 11, OUT);
-  strokePath(ctx, [kx, ky, fx, fy], 7.6, shin);
+  // Outline first: a thick thigh, a calf that swells below the knee and narrows to the ankle.
+  strokePath(ctx, [hx, hy, kx, ky], 12.4, OUT);
+  strokePath(ctx, [kx, ky, fx, fy], 9.6, OUT);
+  const cx = kx + (fx - kx) * 0.3, cy = ky + (fy - ky) * 0.3;
+  strokePath(ctx, [kx, ky, cx, cy], 11, OUT);
+  strokePath(ctx, [kx, ky, fx, fy], 7, shin);
+  strokePath(ctx, [kx, ky, cx, cy], 8.4, shin);
   // Sock.
-  strokePath(ctx, [kx + (fx - kx) * 0.6, ky + (fy - ky) * 0.6, fx, fy], 7.6, shoe);
-  strokePath(ctx, [hx, hy, kx, ky], 8.6, thigh);
+  strokePath(ctx, [kx + (fx - kx) * 0.6, ky + (fy - ky) * 0.6, fx, fy], 7, shoe);
+  strokePath(ctx, [hx, hy, kx, ky], 9.8, thigh);
   // Shoe: toes dip when the foot is off the ground.
   ctx.save();
   ctx.translate(fx, fy);
@@ -449,30 +525,37 @@ function arm(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number,
   const kx = x0 + Math.sin(ang) * L, ky = y0 + Math.cos(ang) * L;
   const a2 = ang + elbow;
   const ex = kx + Math.sin(a2) * L, ey = ky + Math.cos(a2) * L;
-  strokePath(ctx, [x0, y0, kx, ky, ex, ey], 9.4, OUT);
-  strokePath(ctx, [x0, y0, kx, ky, ex, ey], 6.8, skin);
+  // A shoulder and upper arm with some muscle on them, a slimmer forearm, a big fist.
+  strokePath(ctx, [x0, y0, kx, ky], 10.6, OUT);
+  strokePath(ctx, [kx, ky, ex, ey], 8.8, OUT);
+  strokePath(ctx, [kx, ky, ex, ey], 6.2, skin);
+  strokePath(ctx, [x0, y0, kx, ky], 8, skin);
   // Wristband.
-  strokePath(ctx, [kx + (ex - kx) * 0.62, ky + (ey - ky) * 0.62, kx + (ex - kx) * 0.82, ky + (ey - ky) * 0.82], 6.8, band);
+  strokePath(ctx, [kx + (ex - kx) * 0.6, ky + (ey - ky) * 0.6, kx + (ex - kx) * 0.82, ky + (ey - ky) * 0.82], 6.6, band);
   ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.arc(ex, ey, 4.7, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(ex, ey, 5.3, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 1.3;
   ctx.strokeStyle = OUT;
   ctx.stroke();
+  // Knuckles.
+  const ux = (ex - kx) / L, uy = (ey - ky) / L;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(ex + ux * 1.2 - uy * 3, ey + uy * 1.2 + ux * 3); ctx.lineTo(ex + ux * 3.2 - uy * 1.2, ey + uy * 3.2 + ux * 1.2); ctx.stroke();
   return [ex, ey] as const;
 }
 
 /** Draws the figure with its feet at the origin. `base` is the transform at the feet, used to report the hand position. */
-function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, look: PlayerLook, time: number, flip: number, base: DOMMatrix | null) {
+function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, look: PlayerLook, time: number, flip: number, base: DOMMatrix | null, turn: number) {
   const d = p.def;
   const bw = d.build;
   const skin = d.skin;
   const dir = Math.sign(flip) || 1;
   ctx.save();
   // Swung in a throw or spinning through the air: turn the whole figure about its middle.
-  if (p.rot && (p.state === 'held' || p.state === 'down')) {
-    ctx.translate(0, -44 * S);
-    ctx.rotate(p.rot);
-    ctx.translate(0, 44 * S);
+  if (turn) {
+    ctx.translate(0, -PIVOT * S);
+    ctx.rotate(turn);
+    ctx.translate(0, PIVOT * S);
   }
   ctx.scale(flip * S * P.sx, S * P.sy);
   if (P.rot || P.rotY) { ctx.translate(0, -P.rotY); ctx.rotate(P.rot); }
@@ -578,14 +661,53 @@ let flashCv: HTMLCanvasElement | null = null;
 export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, sx: number, time: number, look: PlayerLook) {
   let a = anims.get(p.id);
   if (!a) {
-    a = { pose: targetPose(p, look, time).pose, ready: false, wasAir: false, landT: 0, lastState: p.state, hitT: 0, lastFacing: p.facing, turnT: 0 };
+    a = { pose: targetPose(p, look, time).pose, ready: false, wasAir: false, landT: 0, lastState: p.state, hitT: 0, lastFacing: p.facing, turnT: 0, vel: {}, rag: null, pvx: p.vx, pvy: p.vy, sway: 0, swayV: 0 };
     anims.set(p.id, a);
   }
   // Ease the drawn pose toward the target.
   const { pose: T, rate } = targetPose(p, look, time);
+  const dt = Math.min(look.dt, 1 / 30);
   const k = a.ready ? 1 - Math.exp(-rate * look.dt) : 1;
-  for (const key of KEYS) a.pose[key] += (T[key] - a.pose[key]) * k;
+  // Arms, lean and head move on springs, so they overshoot a little and settle (follow-through).
+  // Feet and hips ease straight to their target so they never slide; so does everything in a fast cycle.
+  const springy = a.ready && rate < 60 && dt > 0;
+  for (const key of KEYS) {
+    if (springy && SPRUNG.has(key)) {
+      const w0 = Math.min(rate * 0.85, 0.9 / dt);
+      const v = (a.vel[key] ?? 0) + (-2 * 0.52 * w0 * (a.vel[key] ?? 0) - w0 * w0 * (a.pose[key] - T[key])) * dt;
+      a.vel[key] = v;
+      a.pose[key] += v * dt;
+    } else {
+      a.pose[key] += (T[key] - a.pose[key]) * k;
+      a.vel[key] = 0;
+    }
+  }
   a.ready = true;
+
+  // The body's acceleration, on screen (y down).
+  const ax = dt > 0 ? clampN((p.vx - a.pvx) / dt, 5000) : 0;
+  const ay = dt > 0 ? clampN(-(p.vy - a.pvy) / dt, 5000) : 0;
+  a.pvx = p.vx; a.pvy = p.vy;
+  // Weight shift: setting off throws the head and chest back, stopping pitches them forward.
+  if (dt > 0) {
+    const want = clampN(-ax * p.facing * 0.00022, 0.32);
+    a.swayV += (-2 * 0.45 * 16 * a.swayV - 16 * 16 * (a.sway - want)) * dt;
+    a.sway = clampN(a.sway + a.swayV * dt, 0.45);
+  }
+
+  // Knocked down: the limbs go limp. They come back under control as the player pushes up.
+  const upAt = p.downFor - 0.28;
+  const limp = p.state === 'down' && p.t < upAt;
+  if (limp) {
+    if (!a.rag) {
+      // Start from wherever the limbs were, whipped back against the direction of the blow.
+      const f = p.facing, kick = -(Math.sign(p.vx) || 1) * 9;
+      a.rag = { th: [f * a.pose.armF, f * a.pose.armB, f * 0.2, -f * 0.2], w: [kick, kick * 0.8, kick * 0.6, kick * 0.7] };
+    }
+    ragStep(a.rag, p, dt, ax, ay);
+    ragPose(a.rag, p, a.pose);
+    for (const key of KEYS) a.vel[key] = 0;
+  } else a.rag = null;
 
   const air = p.y > 1;
   if (a.wasAir && !air && p.state !== 'down') a.landT = 0.16;
@@ -599,6 +721,14 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   a.turnT = Math.max(0, a.turnT - look.dt);
 
   const P: Pose = { ...a.pose };
+  if (!limp && p.state !== 'held' && p.state !== 'ride') { P.head -= a.sway * 0.7; P.lean -= a.sway * 0.45; }
+  // How far the whole figure is turned: the core's tumble, unwinding as the player gets back up.
+  let turn = 0;
+  if (p.state === 'held') turn = p.rot;
+  else if (p.state === 'down') {
+    const r = Math.atan2(Math.sin(p.rot), Math.cos(p.rot));
+    turn = limp ? p.rot : r * (1 - clamp01((p.t - upAt) / 0.28));
+  }
   if (a.landT > 0) {
     // Landing: squash down and absorb with the knees.
     const q = a.landT / 0.16;
@@ -617,7 +747,9 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     const c = Math.cos(p.t * 36);
     flip = p.facing * (Math.abs(c) < 0.25 ? (c < 0 ? -0.25 : 0.25) : c);
   }
-  const footY = sy(p.z, p.y) - P.hop;
+  // A body lying flat rests on the floor, not at standing height: lower the turning point as it tips over.
+  const lying = Math.sin(turn) * Math.sin(turn) * clamp01(1 - p.y / 36);
+  const footY = sy(p.z, p.y) - P.hop + (PIVOT - 12) * S * lying;
   // Hit pause: the one who got hit shakes on the spot.
   if (p.freeze > 0 && (p.state === 'stun' || p.state === 'down')) sx += Math.sin(time * 95 + p.id) * 2.8;
 
@@ -630,7 +762,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     f.globalAlpha = 1;
     f.clearRect(0, 0, 440, 440);
     f.setTransform(2, 0, 0, 2, 220, 330);
-    body(f, p, team, P, look, time, flip, null);
+    body(f, p, team, P, look, time, flip, null, turn);
     f.setTransform(1, 0, 0, 1, 0, 0);
     f.globalCompositeOperation = 'source-atop';
     f.fillStyle = 'rgba(255,255,255,0.92)';
@@ -639,7 +771,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   } else {
     ctx.save();
     ctx.translate(sx, footY);
-    body(ctx, p, team, P, look, time, flip, ctx.getTransform());
+    body(ctx, p, team, P, look, time, flip, ctx.getTransform(), turn);
     ctx.restore();
   }
 

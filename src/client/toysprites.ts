@@ -5,12 +5,16 @@ import type { ItemKind, RideKind } from '../core/teams';
 import { roundRect } from './sprites';
 
 const OUT = '#1a1a22';
+/** How much bigger items are drawn than their paths. */
+export const ITEM_SCALE = 1.4;
 
 /** An item, centred a little above (x, y). `fuse` < 0 means not lit. */
 export function drawItem(ctx: CanvasRenderingContext2D, kind: ItemKind, x: number, y: number, spin: number, fuse = -1, time = 0, armed = false) {
   ctx.save();
-  ctx.translate(x, y - (armed ? 3 : 9));
+  // Drawn a size up from their paths, so they read next to the big-headed players.
+  ctx.translate(x, y - (armed ? 3 : 9) * ITEM_SCALE);
   ctx.rotate(spin);
+  ctx.scale(ITEM_SCALE, ITEM_SCALE);
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = OUT;
   ctx.lineJoin = 'round';
@@ -18,23 +22,39 @@ export function drawItem(ctx: CanvasRenderingContext2D, kind: ItemKind, x: numbe
     case 'can':
       ctx.fillStyle = '#aab3c0';
       roundRect(ctx, -7, -9, 14, 18, 2); ctx.fill(); ctx.stroke();
+      // Lit from the upper left: a bright streak, a dark far side, a dented lid.
+      ctx.fillStyle = '#e6ecf3'; ctx.fillRect(-5.4, -6.5, 2.2, 14);
+      ctx.fillStyle = '#7f8996'; ctx.fillRect(3.6, -6.5, 2.6, 14);
       ctx.fillStyle = '#7d8794';
-      ctx.fillRect(-8.5, -11, 17, 4);
-      ctx.beginPath(); ctx.moveTo(-3, -6); ctx.lineTo(-3, 8); ctx.moveTo(3, -6); ctx.lineTo(3, 8); ctx.stroke();
+      roundRect(ctx, -8.5, -11.5, 17, 4.5, 1.5); ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-1.6, -6); ctx.lineTo(-1.6, 8); ctx.moveTo(1.6, -6); ctx.lineTo(1.6, 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-3, -13.5); ctx.lineTo(3, -13.5); ctx.stroke();
       break;
     case 'cone':
       ctx.fillStyle = '#ff7a1a';
-      ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-1.5, -11); ctx.lineTo(1.5, -11); ctx.lineTo(7, 7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#c9540a';
+      ctx.beginPath(); ctx.moveTo(1.5, -10.4); ctx.lineTo(6.2, 6.4); ctx.lineTo(2.4, 6.4); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-3.6, -3, 7.2, 3);
+      ctx.beginPath(); ctx.moveTo(-3, -4.5); ctx.lineTo(3, -4.5); ctx.lineTo(4.3, 0); ctx.lineTo(-4.3, 0); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ff7a1a';
       ctx.fillRect(-9, 7, 18, 3);
       ctx.strokeRect(-9, 7, 18, 3);
       break;
     case 'crate':
       ctx.fillStyle = '#b5814a';
-      ctx.fillRect(-9, -9, 18, 18); ctx.strokeRect(-9, -9, 18, 18);
-      ctx.beginPath(); ctx.moveTo(-9, -9); ctx.lineTo(9, 9); ctx.moveTo(9, -9); ctx.lineTo(-9, 9); ctx.stroke();
+      ctx.fillRect(-9, -9, 18, 18);
+      // Planks, a darker frame and brace, nail heads.
+      ctx.fillStyle = '#c9965c';
+      for (let i = 0; i < 3; i++) ctx.fillRect(-9, -9 + i * 6, 18, 2.2);
+      ctx.strokeStyle = '#7a4f24'; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(-7, -7); ctx.lineTo(7, 7); ctx.stroke();
+      ctx.strokeRect(-7.6, -7.6, 15.2, 15.2);
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.5;
+      ctx.strokeRect(-9, -9, 18, 18);
+      ctx.fillStyle = '#3a2a1a';
+      for (const [nx, ny] of [[-7.4, -7.4], [7.4, -7.4], [-7.4, 7.4], [7.4, 7.4]]) { ctx.beginPath(); ctx.arc(nx, ny, 0.9, 0, Math.PI * 2); ctx.fill(); }
       break;
     case 'bomb': {
       // Flashes faster and faster as the fuse runs down.

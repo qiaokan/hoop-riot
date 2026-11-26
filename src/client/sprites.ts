@@ -1,3 +1,4 @@
+import type { Net } from './net';
 import { HIGH_RIM_Y, HOOP } from '../core/constants';
 import { ZS, sy } from './view';
 
@@ -104,7 +105,7 @@ export function drawHoopBack(ctx: CanvasRenderingContext2D, hx: number, camX: nu
 }
 
 /** Net and the front half of one rim (drawn over players and the ball). */
-export function drawHoopFront(ctx: CanvasRenderingContext2D, hx: number, camX: number, rimY: number, sway: number, time: number, broken = false) {
+export function drawHoopFront(ctx: CanvasRenderingContext2D, hx: number, camX: number, rimY: number, net: Net, time: number, broken = false) {
   const x = hx - camX;
   const ry = sy(HOOP.z, rimY);
   const r = HOOP.rimR;
@@ -123,23 +124,7 @@ export function drawHoopFront(ctx: CanvasRenderingContext2D, hx: number, camX: n
     ctx.restore();
     return;
   }
-  ctx.strokeStyle = gold ? 'rgba(255,240,190,0.9)' : 'rgba(245,245,245,0.85)';
-  ctx.lineWidth = 1;
-  const wob = Math.sin(time * 30) * sway * 4;
-  const n = 8;
-  for (let i = 0; i <= n; i++) {
-    const a = Math.PI + (i / n) * Math.PI;
-    const tx = x + Math.cos(a) * r;
-    const ty = ry - Math.sin(a) * r * ZS;
-    const bx = x + Math.cos(a) * r * 0.55 + wob;
-    const by = ry + 24 + sway * 8;
-    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(bx, by); ctx.stroke();
-  }
-  for (let k = 1; k <= 2; k++) {
-    const yy = ry + k * 8 + sway * k * 2;
-    const rr = r * (1 - k * 0.15);
-    ctx.beginPath(); ctx.ellipse(x + wob * k * 0.5, yy, rr, rr * ZS * 0.8, 0, 0, Math.PI); ctx.stroke();
-  }
+  net.draw(ctx, x, ry, gold);
   ctx.strokeStyle = gold ? '#ffcf3f' : '#ff6a26';
   ctx.lineWidth = 3;
   ctx.beginPath();

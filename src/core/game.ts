@@ -112,7 +112,10 @@ export interface Ball {
   state: BallState;
   holder: number | null;
   lastTeam: TeamId;
+  /** Drawn rotation angle (follows the real spin below). */
   spin: number;
+  /** Angular velocity in radians a second, about the x, y and z axes. A ball rolling toward +x has wz = -vx / r. */
+  wx: number; wy: number; wz: number;
   afterShot: boolean;
   /** Seconds before the ball can be struck again, and how hard it was last struck (0 no, 1 fist, 2 bat). */
   struck: number;
@@ -157,6 +160,11 @@ export interface Item {
   uses: number;
   /** A banana lying in wait on the floor. */
   armed: boolean;
+}
+
+/** How heavy a player is next to an average one (1): bigger builds and stronger players weigh more. */
+export function massOf(d: PlayerDef): number {
+  return (d.build * d.build * (0.8 + 0.25 * d.power)) / 0.95;
 }
 
 export interface Rim { x: number; y: number; high: boolean; dir: number; boardX: number; top: number; hp: number; brokenT: number }
@@ -268,7 +276,7 @@ export class Game {
         });
       }
     }
-    this.ball = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, state: 'held', holder: null, lastTeam: 0, spin: 0, afterShot: false, struck: 0, hot: 0 };
+    this.ball = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, state: 'held', holder: null, lastTeam: 0, spin: 0, wx: 0, wy: 0, wz: 0, afterShot: false, struck: 0, hot: 0 };
     const first: TeamId = this.rng() < 0.5 ? 0 : 1;
     this.resetFormation(first);
     this.emit('tipoff', COURT.midX, 60, HOOP.z);
@@ -520,11 +528,17 @@ export class Game {
         }
         if (airborne) {
           p.t = Math.min(p.t, 0.29); // still flying
-          if (p.thrown) p.rot += p.spinRate * DT;
+          p.rot += p.spinRate * DT; // every knocked-down body tumbles, not only thrown ones
         } else {
-          const f = this.slip ? 0.965 : 0.9;
-          p.vx *= f; p.vz *= f;
-          if (p.t > p.downFor) { p.state = 'move'; p.t = 0; p.invuln = 0.7; p.hits = 0; }
+          // Sliding: the floor takes speed off at a steady rate (a wet floor much less).
+          const v = Math.hypot(p.vx, p.vz), dec = (this.slip ? 170 : 520) * DT;
+          if (v <= dec) p.vx = p.vz = 0;
+          else { p.vx *= (v - dec) / v; p.vz *= (v - dec) / v; }
+          // Settle flat: on the back or on the face, whichever the tumble left nearer.
+          const lie = Math.round((p.rot - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+          p.rot += (lie - p.rot) * 0.3;
+          p.spinRate = 0;
+          if (p.t > p.downFor) { p.state = 'move'; p.t = 0; p.invuln = 0.7; p.hits = 0; p.rot = 0; }
         }
         break;
       }
@@ -758,11 +772,11 @@ export class Game {
             p.bounced = true;
             p.vy = -vyIn * (p.thrown ? 0.42 : 0.36);
             p.vx *= 0.75;
+            p.spinRate *= 0.45;
             if (p.thrown) p.freeze = 0.07;
             this.emit('slam', p.x, 0, p.z, { player: p.id, power: p.thrown ? 3 : 2 });
           } else {
             p.t = Math.max(p.t, 0.3);
-            p.rot = 0;
             p.thrown = false;
             if (vyIn < -90) this.emit('slam', p.x, 0, p.z, { player: p.id, power: 1 });
           }
@@ -792,10 +806,12 @@ export class Game {
         const d = Math.hypot(dx, dz);
         const min = 22;
         if (d > 0.001 && d < min) {
-          const push = (min - d) / 2;
+          // Two bodies in the same spot push apart, the lighter one giving more ground.
+          const ma = massOf(a.def), mb = massOf(b.def);
+          const pa = ((min - d) * mb) / (ma + mb), pb = min - d - pa;
           const nx = dx / d, nz = dz / d;
-          a.x -= nx * push; b.x += nx * push;
-          a.z -= (nz * push) / 1.4; b.z += (nz * push) / 1.4;
+          a.x -= nx * pa; b.x += nx * pb;
+          a.z -= (nz * pa) / 1.4; b.z += (nz * pb) / 1.4;
         }
       }
     }
@@ -860,14 +876,23 @@ export class Game {
       tz += Math.sin(a) * r;
     }
     const dxz = distXZ(b.x, b.z, tx, tz);
-    const T = special ? 0.95 : clamp(0.5 + dxz / 950, 0.55, 1.1);
+    // In low gravity the same arc takes longer, so the ball still drops into the hoop instead of skimming it.
+    const T = (special ? 0.95 : clamp(0.5 + dxz / 950, 0.55, 1.1)) * Math.sqrt(GRAVITY / this.grav);
     b.vx = (tx - b.x) / T;
     b.vz = (tz - b.z) / T;
     b.vy = (ty - b.y) / T + 0.5 * this.grav * T;
+    this.spinBall(special ? 0 : 13);
     b.state = 'shot';
     b.holder = null;
     b.afterShot = true;
     b.shot = { made: spread === 0, points, team: p.team, shooter: p.id, t: 0, T, special, hoopX: hx, rimY, three, touched: false, board: false };
+  }
+
+  /** Sets the ball's spin about the axis across its path: positive is backspin, negative topspin (rad/s). */
+  spinBall(back: number) {
+    const b = this.ball;
+    const h = Math.hypot(b.vx, b.vz) || 1;
+    b.wx = (-b.vz / h) * back; b.wz = (b.vx / h) * back; b.wy = 0;
   }
 
   // ---------------------------------------------------------------- specials
@@ -1082,6 +1107,7 @@ export class Game {
     b.vx = (tx - b.x) / T;
     b.vz = (tz - b.z) / T;
     b.vy = (ty - b.y) / T + 0.5 * this.grav * T;
+    this.spinBall(5);
     b.state = 'pass';
     b.holder = null;
     b.pass = { from: p.id, to: mate.id, t: 0, T, oop };
@@ -1178,7 +1204,7 @@ export class Game {
       o.state = 'stun';
       o.t = 0;
       o.stunFor = big ? 0.5 : 0.36;
-      o.vx = a.facing * (big ? 240 : 95 + 40 * a.def.power);
+      o.vx = (a.facing * (big ? 240 : 95 + 40 * a.def.power)) / Math.sqrt(massOf(o.def));
       this.emit('hit', cx, o.y + 48, o.z, { player: o.id, team: a.team, power: big ? 2 : 1 });
     }
   }
@@ -1198,10 +1224,14 @@ export class Game {
     o.blitz = false;
     o.bounced = false;
     o.bowled = false;
-    o.thrown = false; o.rot = 0; o.spinRate = 0; o.downFor = 1.1;
-    o.vx = dir * force;
+    o.thrown = false; o.rot = 0; o.downFor = 1.1;
+    // The same blow moves a heavy body less than a light one.
+    const k = 1 / Math.sqrt(massOf(o.def));
+    o.vx = dir * force * k;
     o.vz *= 0.3;
-    o.vy = lift < 0 && o.y > 30 ? lift : Math.abs(lift);
+    o.vy = lift < 0 && o.y > 30 ? lift : Math.abs(lift) * (0.5 + 0.5 * k);
+    // The blow also turns the body: head over heels, away from the hit, faster for a harder one.
+    o.spinRate = (Math.sign(dir) || 1) * clamp(2.5 + force / 75, 4, 9.5);
     this.stats[byTeam].kos++;
     this.emit('ko', o.x, o.y + 44, o.z, { player: o.id, team: byTeam });
   }
@@ -1340,6 +1370,8 @@ export class Game {
     b.vx = dir * (140 + this.rng() * 90);
     b.vz = (this.rng() - 0.5) * 160;
     b.vy = 240;
+    this.spinBall(-(6 + this.rng() * 14)); // knocked loose: it tumbles forward
+    b.wy = (this.rng() - 0.5) * 20;
     o.pickupCd = 0.5;
     o.released = true;
     this.stats[byTeam].steals++;
@@ -1395,7 +1427,8 @@ export class Game {
     it.x = p.x; it.z = p.z;
     it.y = p.y + 20;
     it.vy = 120;
-    it.vx = it.vz = 0;
+    // It keeps some of its carrier's motion, so it tumbles away rather than dropping dead.
+    it.vx = p.vx * 0.5; it.vz = p.vz * 0.5;
   }
 
   throwItem(p: Player, it: Item) {
@@ -1441,8 +1474,9 @@ export class Game {
   private updateBall() {
     const b = this.ball;
     b.struck = Math.max(0, b.struck - DT);
-    b.spin += DT * (Math.abs(b.vx) + Math.abs(b.vz)) * 0.05;
+    b.spin += DT * (-b.wz + Math.abs(b.wx) * 0.6);
     if (b.state === 'held') {
+      b.wx = b.wy = b.wz = 0;
       const h = this.holder()!;
       const moving = Math.hypot(h.vx, h.vz) > 20 && h.y === 0 && h.state === 'move';
       const dribble = moving ? Math.abs(Math.sin(this.time * 9)) : 1;
@@ -1471,7 +1505,9 @@ export class Game {
     if (b.state === 'shot') this.updateShot();
     else if (b.state === 'pass') this.updatePass();
     else if (b.state === 'scored') {
+      // The net drags on the ball: it loses its sideways speed and its spin.
       b.vx *= 0.9; b.vz *= 0.9;
+      b.wx *= 0.85; b.wy *= 0.85; b.wz *= 0.85;
       // Out of the bottom of the net: live again, kicked a little toward the middle of the court.
       if (b.y < 105) {
         const out = b.x < COURT.midX ? 1 : -1;
@@ -1483,16 +1519,19 @@ export class Game {
     }
 
     // Floor and walls.
-    if (b.y < 5) {
-      b.y = 5;
+    const fr = this.ballR - 4; // height of the ball's centre when it rests on the floor
+    if (b.y < fr) {
+      b.y = fr;
       if (b.vy < -70) this.emit('bounce', b.x, 0, b.z);
       b.hot = 0; // a struck ball only stings until it touches the floor
-      b.vy = Math.abs(b.vy) > 70 ? -b.vy * 0.62 : 0;
-      b.vx *= 0.86; b.vz *= 0.86;
+      // The floor grips the ball: backspin brakes it (or brings it back), topspin drives it on.
+      if (b.vy < -70) this.ballContact(0, 1, 0, this.heavyBall ? 0.35 : 0.62, this.slip ? 0.15 : 0.7);
+      else b.vy = 0;
       if (b.state === 'pass') { b.state = 'loose'; b.pass = undefined; }
       if (b.state === 'shot') { b.state = 'loose'; b.shot = undefined; }
     }
-    if (b.y <= 5.5 && b.vy === 0) { b.vx *= 0.985; b.vz *= 0.985; }
+    if (b.y <= fr + 0.5 && b.vy === 0) this.rollBall();
+    else { b.wx *= 0.999; b.wy *= 0.995; b.wz *= 0.999; }
     if (b.x < COURT.minX - 10) { b.x = COURT.minX - 10; b.vx = Math.abs(b.vx) * 0.6; }
     if (b.x > COURT.maxX + 10) { b.x = COURT.maxX + 10; b.vx = -Math.abs(b.vx) * 0.6; }
     if (b.z < COURT.minZ - 6) { b.z = COURT.minZ - 6; b.vz = Math.abs(b.vz) * 0.6; }
@@ -1501,6 +1540,52 @@ export class Game {
     // A shot can be rebounded once it has come off the rim or board, or has clearly missed everything.
     const reboundable = b.state === 'shot' && !!b.shot && (b.shot.touched || b.shot.t > b.shot.T + 0.15);
     if ((b.state === 'loose' || reboundable) && this.phase === 'play') this.tryPickup();
+  }
+
+  /**
+   * The ball meets a surface whose unit normal (nx, ny, nz) points away from it. It rebounds with
+   * restitution `e`, and friction `mu` acts on the slip between the ball's surface and the wall,
+   * trading speed for spin. Returns the speed it came in at.
+   */
+  private ballContact(nx: number, ny: number, nz: number, e: number, mu: number): number {
+    const b = this.ball, r = this.ballR;
+    const vn = b.vx * nx + b.vy * ny + b.vz * nz;
+    if (vn >= 0) return 0;
+    b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny; b.vz -= (1 + e) * vn * nz;
+    // Slip of the contact point: the ball's own velocity plus the spin there, less the normal part.
+    const cx = b.wy * nz - b.wz * ny, cy = b.wz * nx - b.wx * nz, cz = b.wx * ny - b.wy * nx;
+    let ux = b.vx - r * cx, uy = b.vy - r * cy, uz = b.vz - r * cz;
+    const un = ux * nx + uy * ny + uz * nz;
+    ux -= un * nx; uy -= un * ny; uz -= un * nz;
+    const u = Math.hypot(ux, uy, uz);
+    if (u > 0.001) {
+      // A hollow ball that grips fully loses 2/5 of its slip; friction can only do so much in one touch.
+      const k = Math.min(0.4, (mu * (1 + e) * -vn) / u);
+      const dx = -k * ux, dy = -k * uy, dz = -k * uz;
+      b.vx += dx; b.vy += dy; b.vz += dz;
+      const q = 1.5 / r;
+      b.wx -= q * (ny * dz - nz * dy); b.wy -= q * (nz * dx - nx * dz); b.wz -= q * (nx * dy - ny * dx);
+    }
+    return -vn;
+  }
+
+  /** A ball resting on the floor: sliding friction brings it to a true roll, then rolling resistance stops it. */
+  private rollBall() {
+    const b = this.ball, r = this.ballR;
+    const g = this.slip ? 0.25 : 1;
+    // Slip between the ball and the floor.
+    const ux = b.vx + r * b.wz, uz = b.vz - r * b.wx;
+    const u = Math.hypot(ux, uz);
+    if (u > 1) {
+      const k = Math.min(0.4, (900 * g * DT) / u);
+      b.vx -= k * ux; b.vz -= k * uz;
+      b.wz -= (1.5 / r) * k * ux; b.wx += (1.5 / r) * k * uz;
+    }
+    const v = Math.hypot(b.vx, b.vz);
+    const dec = (this.heavyBall ? 260 : 45 + 0.55 * v) * g * DT;
+    if (v <= dec) { b.vx = b.vz = 0; b.wx = b.wz = 0; }
+    else { const f = (v - dec) / v; b.vx *= f; b.vz *= f; b.wx = b.vz / r; b.wz = -b.vx / r; }
+    b.wy *= 0.9;
   }
 
   private updateShot() {
@@ -1560,8 +1645,8 @@ export class Game {
         nx /= dist; ny /= dist; nz /= dist;
         const vn = b.vx * nx + b.vy * ny + b.vz * nz;
         if (vn < 0) {
-          b.vx -= 1.55 * vn * nx; b.vy -= 1.55 * vn * ny; b.vz -= 1.55 * vn * nz;
-          b.vx *= 0.96; b.vz *= 0.96;
+          // Iron rim: a dull bounce, and it bites into the ball's spin (backspin softens the next touch).
+          this.ballContact(nx, ny, nz, 0.55, 0.5);
           const push = r + 1.5 - dist;
           b.x += nx * push; b.y += ny * push; b.z += nz * push;
           if (s) s.touched = true;
@@ -1574,9 +1659,8 @@ export class Game {
       if (Math.abs(b.z - HOOP.z) < 36 + r * 0.5 && b.y > hp.y - 8 - r * 0.5 && b.y < hp.top + r * 0.5) {
         const rel = (b.x - hp.boardX) * hp.dir; // positive on the court side
         if (rel < r && rel > -r && b.vx * hp.dir < 0) {
-          b.vx = -b.vx * 0.6;
-          b.vy *= 0.92;
-          b.vz *= 0.9;
+          // Glass: backspin off the board sends the ball down toward the rim, as it does on a real court.
+          this.ballContact(hp.dir, 0, 0, 0.6, 0.6);
           b.x = hp.boardX + hp.dir * r;
           if (s) { s.touched = true; s.board = true; }
           this.emit('board', hp.boardX, b.y, b.z);

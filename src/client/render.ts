@@ -4,16 +4,17 @@ import type { CourtId } from '../core/teams';
 import { EVENT_NAME, RIDE } from '../core/toys';
 import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './background';
 import { Mood, drawPlayer, handPos } from './character';
+import { Net } from './net';
 import { drawBall, drawHoopBack, drawHoopFront, drawPad, drawShadow, roundRect } from './sprites';
 import { drawBat, drawBumper, drawCar, drawDog, drawHammer, drawItem, drawRideBack, drawRideFront, drawShell, drawUfo, drawWrecker } from './toysprites';
-import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, sy } from './view';
+import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, ZS, sy } from './view';
 
 interface Particle {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   life: number; max: number;
   color: string; size: number;
-  kind: 'spark' | 'dust' | 'fire' | 'confetti' | 'ring' | 'impact';
+  kind: 'spark' | 'dust' | 'fire' | 'confetti' | 'ring' | 'impact' | 'chunk';
   grav: number;
 }
 
@@ -32,8 +33,8 @@ export class Renderer {
   private particles: Particle[] = [];
   private popups: Popup[] = [];
   private banner: Banner | null = null;
-  /** Net sway per hoop: index = side * 2 + (upper hoop ? 1 : 0). */
-  private netSway = [0, 0, 0, 0];
+  /** The four nets: index = side * 2 + (upper hoop ? 1 : 0). */
+  private nets = [new Net(), new Net(), new Net(), new Net()];
   private flash = 0;
   private scale = 1;
   private rnd = Math.random;
@@ -144,14 +145,14 @@ export class Renderer {
         this.shake = Math.max(this.shake, 5);
         break;
       case 'swish':
-        this.netSway[net(high)] = 1;
+        this.nets[net(high)].kick(0.5);
         this.lastSwishHigh = high;
         if (e.text) this.popup(e.text, { ...e, y: e.y + 10 }, e.power === 2 ? '#ffffff' : '#ffe14a', 15);
         break;
       case 'board':
         // Ball off the backboard.
         this.burst(e, 5, '#ffffff', 'spark', 110);
-        this.netSway[net(high)] = Math.max(this.netSway[net(high)], 0.3);
+        this.nets[net(high)].kick(0.25);
         break;
       case 'grab':
         this.burst(e, 10, '#ffe14a', 'spark', 200);
@@ -160,7 +161,7 @@ export class Renderer {
         this.shake = Math.max(this.shake, 5);
         break;
       case 'rim':
-        this.netSway[net(high)] = 0.5;
+        this.nets[net(high)].kick(0.5);
         this.burst(e, 5, '#ffb15c', 'spark', 120);
         break;
       case 'score': {
@@ -172,7 +173,7 @@ export class Renderer {
         break;
       }
       case 'dunk':
-        this.netSway[net(high)] = 1.4;
+        this.nets[net(high)].kick(2);
         this.burst(e, 30, '#ffffff', 'spark', 380);
         this.ring(e, '#ffe14a');
         this.shake = Math.max(this.shake, 12);
@@ -255,7 +256,7 @@ export class Renderer {
         this.ring(e, '#7dff6a');
         break;
       case 'bodydunk':
-        this.netSway[net(high)] = 1.6;
+        this.nets[net(high)].kick(2.4);
         this.burst(e, 26, '#ffffff', 'spark', 360);
         this.ring(e, '#ff4fa3');
         this.shake = Math.max(this.shake, 14);
@@ -301,6 +302,16 @@ export class Renderer {
         this.burst(e, 4, 'rgba(220,220,230,0.8)', 'dust', 80);
         break;
       case 'itemhit':
+        if (e.text === 'crate') {
+          // A smashed crate: planks that tumble away and clatter on the floor.
+          for (let i = 0; i < 9; i++) {
+            const a = this.rnd() * Math.PI * 2, sp = 120 + this.rnd() * 220;
+            this.particles.push({
+              x: e.x, y: e.y + 8, z: e.z, vx: Math.cos(a) * sp, vy: 160 + this.rnd() * 260, vz: Math.sin(a) * sp * 0.4,
+              life: 0, max: 1.1 + this.rnd() * 0.5, color: i % 3 ? '#c8924a' : '#8a5a2b', size: 5 + this.rnd() * 5, kind: 'chunk', grav: 1500,
+            });
+          }
+        }
         this.burst(e, 14, '#d8c9a8', 'spark', 260);
         this.impact(e, '#ffb347', 34);
         this.popup('CRASH!', e, '#ffb347', 17);
@@ -562,8 +573,8 @@ export class Renderer {
     for (const it of items) it.draw();
 
     for (const [hx, side] of [[HOOP.leftX, 0], [HOOP.rightX, 2]] as const) {
-      drawHoopFront(ctx, hx, camX, HIGH_RIM_Y, this.netSway[side + 1], game.time, broken(hx, true));
-      drawHoopFront(ctx, hx, camX, HOOP.rimY, this.netSway[side], game.time, broken(hx, false));
+      drawHoopFront(ctx, hx, camX, HIGH_RIM_Y, this.nets[side + 1], game.time, broken(hx, true));
+      drawHoopFront(ctx, hx, camX, HOOP.rimY, this.nets[side], game.time, broken(hx, false));
     }
 
     // Worn power-ups show over the head; a ridden vehicle shows how much longer it lasts.
@@ -688,7 +699,8 @@ export class Renderer {
     const ctx = this.ctx;
     const time = game.time;
     if (it.state !== 'held' || it.holder === null) {
-      drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.state === 'thrown' ? it.spin : 0, it.fuse, time, it.armed);
+      // Loose items keep whatever angle their tumbling and rolling left them at.
+      drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.armed ? 0 : it.spin, it.fuse, time, it.armed);
       return;
     }
     const h = game.players[it.holder];
@@ -776,7 +788,14 @@ export class Renderer {
   private updateFx(game: Game, dt: number) {
     this.shake = Math.max(0, this.shake - dt * 30);
     this.flash = Math.max(0, this.flash - dt * 1.6);
-    this.netSway = this.netSway.map((v) => Math.max(0, v - dt * 1.5));
+    // Nets: the ball pushes its way through them (seen flat on, as the camera sees it).
+    const bl = game.ball;
+    const gust = game.toys.gust;
+    for (let i = 0; i < 4; i++) {
+      const hx = i < 2 ? HOOP.leftX : HOOP.rightX, rimY = i % 2 ? HIGH_RIM_Y : HOOP.rimY;
+      const near = bl.state !== 'held' && Math.abs(bl.x - hx) < 40 && Math.abs(bl.z - HOOP.z) < 30 && bl.y < rimY + 20 && bl.y > rimY - 50;
+      this.nets[i].step(dt, near ? { x: bl.x - hx, y: (bl.z - HOOP.z) * ZS - (bl.y - rimY), vx: bl.vx, vy: bl.vz * ZS - bl.vy, r: game.ballR } : null, gust ? gust.dir : 0);
+    }
     this.zoomT = Math.max(0, this.zoomT - dt);
     this.slowT = Math.max(0, this.slowT - dt);
     this.zoom += ((this.zoomT > 0 ? 1.22 : 1) - this.zoom) * (1 - Math.exp(-dt * 9));
@@ -850,6 +869,8 @@ export class Renderer {
       p.vy -= p.grav * fxDt;
       p.x += p.vx * fxDt; p.y += p.vy * fxDt; p.z += p.vz * fxDt;
       if (p.kind === 'confetti' && p.y < 4) { p.y = 4; p.vx *= 0.8; p.vy = 0; }
+      // Debris bounces and scrapes along the floor.
+      if (p.kind === 'chunk' && p.y < 2 && p.vy < 0) { p.y = 2; p.vy = -p.vy * 0.4; p.vx *= 0.6; p.vz *= 0.6; if (p.vy < 40) { p.vy = 0; p.grav = 0; } }
     }
     this.particles = this.particles.filter((p) => p.life < p.max);
     for (const p of this.popups) { p.life -= dt; p.y += 40 * dt; }
@@ -882,6 +903,16 @@ export class Renderer {
         ctx.lineWidth = 4 * k + 1;
         const r = 10 + (1 - k) * 120;
         ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
+      } else if (p.kind === 'chunk') {
+        // A splintered plank, turning as it flies and lying still once it lands.
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(p.grav ? p.life * 9 + p.size : p.size);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size, -1.6, p.size * 2, 3.2);
+        ctx.strokeStyle = 'rgba(27,19,32,0.8)'; ctx.lineWidth = 1;
+        ctx.strokeRect(-p.size, -1.6, p.size * 2, 3.2);
+        ctx.restore();
       } else if (p.kind === 'spark') {
         ctx.strokeStyle = p.color;
         ctx.lineWidth = 2;
