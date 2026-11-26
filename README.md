@@ -98,7 +98,8 @@ Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Sp
   - `teams.ts`: teams, courts and upgrades.
 - `src/client/`:
   - `render.ts`: Canvas 2D renderer: camera, zoom and slow motion, particles, HUD.
-  - `sprites.ts`: characters (big-head figures with mood-driven faces), ball, hoops, pads, items.
+  - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash) with wind-up and follow-through, and the drawn pose eases toward it. Also faces, outlines and the hit flash.
+  - `sprites.ts`: ball, hoops, pads, items.
   - `background.ts`: five court themes painted from palettes.
   - `audio.ts`: WebAudio synth for SFX and a music loop.
   - `input.ts`: keyboard layouts for one or two players, and gamepads.

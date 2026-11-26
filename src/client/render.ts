@@ -2,7 +2,8 @@ import { COURT, GRAVITY, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/
 import type { Game, GameEvent, Player } from '../core/game';
 import type { CourtId } from '../core/teams';
 import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './background';
-import { Mood, drawBall, drawHoopBack, drawHoopFront, drawItem, drawPad, drawPlayer, drawShadow, roundRect } from './sprites';
+import { Mood, drawPlayer, handPos } from './character';
+import { drawBall, drawHoopBack, drawHoopFront, drawItem, drawPad, drawShadow, roundRect } from './sprites';
 import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, sy } from './view';
 
 interface Particle {
@@ -10,7 +11,7 @@ interface Particle {
   vx: number; vy: number; vz: number;
   life: number; max: number;
   color: string; size: number;
-  kind: 'spark' | 'dust' | 'fire' | 'confetti' | 'ring';
+  kind: 'spark' | 'dust' | 'fire' | 'confetti' | 'ring' | 'impact';
   grav: number;
 }
 
@@ -43,6 +44,9 @@ export class Renderer {
   private fy = VIEW_H / 2;
   private slowT = 0;
   private lastSwishHigh = false;
+  /** Recent ball positions while it flies, for the motion trail. */
+  private trail: { x: number; y: number; z: number }[] = [];
+  private dustT = 0;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -80,6 +84,7 @@ export class Renderer {
     this.zoom = 1;
     this.zoomT = 0;
     this.slowT = 0;
+    this.trail = [];
   }
 
   showBanner(text: string, color = '#ffe14a', sub?: string, life = 1.4) {
@@ -107,11 +112,13 @@ export class Renderer {
     switch (e.type) {
       case 'hit':
         this.burst(e, 9, '#fff6a8', 'spark', 220);
+        this.impact(e, '#ffffff', 26);
         this.popup(HIT_WORDS[Math.floor(this.rnd() * HIT_WORDS.length)], e, '#ffffff', 16);
         this.shake = Math.max(this.shake, 4);
         break;
       case 'ko':
         this.burst(e, 18, '#ffd23f', 'spark', 320);
+        this.impact(e, '#ffe14a', 40);
         this.popup('DOWN!', e, '#ff5a5a', 22);
         this.shake = Math.max(this.shake, 9);
         break;
@@ -174,6 +181,7 @@ export class Renderer {
         break;
       case 'itemhit':
         this.burst(e, 14, '#d8c9a8', 'spark', 260);
+        this.impact(e, '#ffb347', 34);
         this.popup('CRASH!', e, '#ffb347', 17);
         this.shake = Math.max(this.shake, 6);
         break;
@@ -247,6 +255,11 @@ export class Renderer {
     }
   }
 
+  /** Comic-style starburst where a hit lands. */
+  private impact(e: { x: number; y: number; z: number }, color: string, size: number) {
+    this.particles.push({ x: e.x, y: e.y, z: e.z, vx: this.rnd() * 6, vy: 0, vz: 0, life: 0, max: 0.14, color, size, kind: 'impact', grav: 0 });
+  }
+
   private ring(e: { x: number; y: number; z: number }, color: string) {
     this.particles.push({ x: e.x, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0, life: 0, max: 0.45, color, size: 10, kind: 'ring', grav: 0 });
   }
@@ -271,6 +284,7 @@ export class Renderer {
     if (game.phase === 'end') side = game.winner;
     else if (game.phase === 'score' && game.lastScorer !== null) side = game.players[game.lastScorer].team;
     if (side !== null) return p.team === side ? { mood: 'happy', celebrate: true } : { mood: 'sad', celebrate: false };
+    if (Math.hypot(p.vx, p.vz) > 215) return { mood: 'effort', celebrate: false };
     return { mood: 'normal', celebrate: false };
   }
 
@@ -309,7 +323,7 @@ export class Renderer {
     drawHoopBack(ctx, HOOP.rightX, camX);
 
     // Shadows.
-    for (const p of game.players) drawShadow(ctx, p.x - camX, p.z, p.y, 21 * p.def.build);
+    for (const p of game.players) drawShadow(ctx, p.x - camX, p.z, p.y, 24 * p.def.build);
     const b = game.ball;
     drawShadow(ctx, b.x - camX, b.z, b.y, 10);
     for (const it of game.items) if (it.state !== 'held') drawShadow(ctx, it.x - camX, it.z, it.y, 10);
@@ -324,10 +338,41 @@ export class Renderer {
         z: p.z,
         draw: () => drawPlayer(ctx, p, game.teams[p.team], p.x - camX, game.time, {
           ...look, hasBall: b.holder === p.id, label: h?.label, labelColor: h?.color,
+          dt, ballH: b.y - p.y, gazeX: b.x - p.x, gazeY: b.y - (p.y + 70), carrying: !!game.heldItem(p),
         }),
       });
     }
-    items.push({ z: b.z + 1, draw: () => drawBall(ctx, b.x - camX, sy(b.z, b.y), b.spin, !!b.shot?.special) });
+    items.push({
+      z: b.z + 1,
+      draw: () => {
+        // Motion trail behind a flying ball.
+        this.trail.forEach((t, i) => {
+          const k = (i + 1) / (this.trail.length + 1);
+          ctx.fillStyle = `rgba(255,170,90,${0.32 * k})`;
+          ctx.beginPath(); ctx.arc(t.x - camX, sy(t.z, t.y), 9 * (0.45 + 0.5 * k), 0, Math.PI * 2); ctx.fill();
+        });
+        let bx = b.x - camX, by = sy(b.z, b.y);
+        const hd = b.holder !== null ? handPos(b.holder) : null;
+        if (hd && b.holder !== null) {
+          // A held ball is drawn at the carrier's hand, so it never floats beside the body.
+          const h = game.players[b.holder];
+          const hx = h.x - camX + hd.dx, hy = sy(h.z, h.y) + hd.dy;
+          const dribbling = h.state === 'move' && h.y === 0 && Math.hypot(h.vx, h.vz) > 20;
+          if (dribbling) {
+            // Bounce between the floor and the palm.
+            const k = Math.max(0, Math.min(1, (b.y - 6) / 30));
+            const floorY = sy(h.z, 0) - 9;
+            bx = hx + h.facing * 2;
+            by = floorY + (hy + 12 - floorY) * k;
+          } else if (h.state === 'shoot' || h.state === 'dunk' || h.state === 'hang' || h.state === 'jump') {
+            bx = hx; by = hy - 8;
+          } else {
+            bx = hx + h.facing * 5; by = hy + 4;
+          }
+        }
+        drawBall(ctx, bx, by, b.spin, !!b.shot?.special);
+      },
+    });
     for (const it of game.items) {
       items.push({ z: it.z + 2, draw: () => drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.state === 'thrown' ? it.spin : 0) });
     }
@@ -348,7 +393,7 @@ export class Renderer {
       const W = game.shotWindow(h);
       const off = Math.abs(h.vy) / GRAVITY;
       const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
-      const bw = 70, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 146;
+      const bw = 70, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 166;
       const zone = Math.max(2, (W / tA) * bw);
       const inZone = off <= W;
       ctx.fillStyle = 'rgba(12,8,28,0.9)';
@@ -424,6 +469,26 @@ export class Renderer {
         });
       }
     }
+    // Ball trail while it is shot, passed or knocked loose at speed.
+    const flying = b.state === 'shot' || b.state === 'pass' || (b.state === 'loose' && Math.hypot(b.vx, b.vy, b.vz) > 260);
+    if (flying && fxDt > 0) { this.trail.push({ x: b.x, y: b.y, z: b.z }); if (this.trail.length > 7) this.trail.shift(); }
+    else if (this.trail.length) this.trail.shift();
+    // Dust: sprint footfalls, tackle slides, and bodies skidding after a knockdown.
+    this.dustT -= fxDt;
+    if (this.dustT <= 0) {
+      this.dustT = 0.07;
+      for (const p of game.players) {
+        if (p.y > 0) continue;
+        const sp = Math.hypot(p.vx, p.vz);
+        const skid = (p.state === 'down' || p.state === 'tackle') && sp > 70;
+        if (!skid && !(p.state === 'move' && sp > 215)) continue;
+        this.particles.push({
+          x: p.x - Math.sign(p.vx) * 8, y: 3, z: p.z + (this.rnd() - 0.5) * 6,
+          vx: -p.vx * 0.15 + (this.rnd() - 0.5) * 30, vy: 20 + this.rnd() * 30, vz: 0,
+          life: 0, max: skid ? 0.5 : 0.32, color: 'rgba(215,215,225,0.75)', size: skid ? 7 : 4.5, kind: 'dust', grav: -20,
+        });
+      }
+    }
     // Speed lines behind a Mega Slam or Blitz.
     for (const p of game.players) {
       const mega = p.state === 'dunk' && p.dunk?.kind === 'mega';
@@ -451,7 +516,22 @@ export class Renderer {
       const k = 1 - p.life / p.max;
       const x = p.x - camX, y = sy(p.z, p.y);
       ctx.globalAlpha = Math.max(0, Math.min(1, k * 1.4));
-      if (p.kind === 'ring') {
+      if (p.kind === 'impact') {
+        // Spiky starburst that pops out and vanishes.
+        const r = p.size * (0.55 + 0.6 * (1 - k));
+        ctx.fillStyle = p.color;
+        ctx.strokeStyle = 'rgba(10,6,24,0.9)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2 + p.vx;
+          const rr = i % 2 ? r * 0.45 : r;
+          ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.9);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.kind === 'ring') {
         ctx.strokeStyle = p.color;
         ctx.lineWidth = 4 * k + 1;
         const r = 10 + (1 - k) * 120;
