@@ -8,66 +8,109 @@ A 2-on-2 street-basketball brawler that runs in the browser. Fighting is legal: 
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # dist/hoop-riot.html — one self-contained file, open it directly
-npm test           # headless AI-vs-AI simulation tests
+npm test           # headless simulation and mechanics tests
 ```
+
+## Modes
+
+| Mode | What it is |
+|---|---|
+| **Street Tour** | Beat four crews in order, each on its own court. Pick one of three upgrades after every win. Progress is saved in the browser. |
+| **Quick Match** | One game against the crew you choose. |
+| **2P Co-op** | Two people on the same team against the computer. Each person keeps one player. |
+| **2P Versus** | Person against person. Each has a computer teammate. |
+
+## Controls
+
+One player:
 
 | Action | Keyboard | Gamepad |
 |---|---|---|
 | Move | WASD / arrows | Left stick / D-pad |
 | Sprint | Shift | RB / RT |
 | Shoot / jump | J or Space: hold to jump, let go when the marker is in the green | A |
-| Pass (with ball) / punch (without) / call for pass (teammate has ball) | K | X |
+| Pass (with ball) / punch (without) / throw (holding an item) | K | X |
 | Running tackle | Sprint + K without the ball | RB + X |
 | Air kick | K while jumping | X in the air |
 | Dodge (cannot be hit) | L | B / Y |
 | Special | L when the RIOT meter is full | B / Y |
+| Switch player (on defense) | Q | LB |
 | Pause · mute · music | P · M · N | Start |
 
-**Rules:** 2-on-2, one court, 2–5 minute game clock, 15-second shot clock. 3 points from beyond the arc. Tied at the buzzer means sudden death.
+Two players on one keyboard:
 
-**Shooting:** a bar appears over your head during a jump shot. Let go while the marker is in the green zone and the shot always scores. The zone shrinks with distance and when a defender is close or in the air. Outside the zone the shot is a gamble that gets worse the further off you were.
+| Action | Player 1 | Player 2 |
+|---|---|---|
+| Move | W A S D | Arrow keys |
+| Sprint | Left Shift | Right Shift |
+| Shoot / jump | J | , (comma) |
+| Pass / hit / throw | K | . (period) |
+| Dodge / special | L | / (slash) |
+| Switch player (Versus) | Q | ' (quote) |
 
-**Dunks:** sprint into the paint and press shoot. A dunk always scores unless you are hit out of the air.
+With one gamepad connected in a two-player mode, the gamepad goes to Player 2. With two, each player gets one.
 
-**Alley-oop:** pass to a teammate who is jumping near the rim and they dunk it. If your teammate has the ball, jump at the rim yourself and they throw you the lob.
+**Who you control:** in one-player modes and in Versus, you always drive your team's ball carrier, and control follows your passes. On defense, press the switch key to take your other player. Control also moves on its own when your player is knocked down.
 
-**Fighting:**
+## Rules
+
+- 2-on-2, 2–5 minute game clock, 15-second shot clock. 3 points from beyond the arc. Tied at the buzzer means sudden death.
+- **Shooting:** a bar appears over your head during a jump shot. Let go while the marker is in the green zone and the shot always scores. The zone shrinks with distance and when a defender is close or in the air.
+- **Dunks:** sprint into the paint and press shoot. A dunk always scores unless you are hit out of the air.
+- **Alley-oop:** pass to a teammate who is jumping near the rim and they dunk it.
+
+**Fighting**
 - A jab staggers but never takes the ball. Three jabs in a row knock the player down.
-- A running tackle or an air kick knocks down at once. A missed tackle leaves you sliding.
-- Hitting anyone who is in the air (a shooter or a dunker) knocks them down.
-- A knocked-down ball carrier drops the ball.
+- A running tackle, an air kick or a thrown item knocks down at once. A missed tackle leaves you sliding.
+- Hitting anyone who is in the air knocks them down. A knocked-down ball carrier drops the ball.
 - A dodge slips any of these and passes through defenders. It costs stamina.
+
+**The stage**
+- **Upper hoop:** every basket has a gold hoop above the normal one. A shot let go high in the air goes at it for a bonus point (3 from inside the arc, 4 from outside).
+- **Launch pads:** step on a yellow pad to be thrown into the air. Press shoot near the rim for a 3-point sky dunk, or hold and release for an air shot at the upper hoop. A pad needs 4 seconds to recharge.
+- **Items:** trash cans, cones and crates drop onto the court. Walk over one with empty hands to pick it up, then press K to throw it.
 
 **RIOT meter:** fills from hits, scores, steals and blocks. Each character has two specials:
 
 | Character type | With the ball | Without the ball |
 |---|---|---|
-| Shooters (Dash, Pike, Jinx, Rex) | **Comet Shot**: cannot miss, floors anyone in its path | **Blitz**: a homing tackle that runs down the ball carrier |
-| Bruisers (Mo, Rusty, Volt, Tank) | **Mega Slam**: a flying dunk from anywhere, worth 3 | **Shockwave**: floors everyone nearby |
+| Shooters (Dash, Pike, Jinx, Ace, Rex) | **Comet Shot**: cannot miss, floors anyone in its path | **Blitz**: a homing tackle that runs down the ball carrier |
+| Bruisers (Mo, Rusty, Volt, Gale, Tank) | **Mega Slam**: a flying dunk from anywhere into the upper hoop, worth 3 | **Shockwave**: floors everyone nearby |
 
-**Opponents:** Harbor Hounds (easy), Neon Vipers (normal), Iron Monarchs (hard). The URL parameter `?opp=0|1|2` preselects one.
+## Street Tour
 
-**Debug/testing URL params:** `?autoplay=1` (CPU vs CPU), `?speed=4`, `?seed=N`, `?mute=1`. `window.__hoop.advance(n)` steps the simulation from the console.
+| Game | Crew | Court | What the court has |
+|---|---|---|---|
+| 1 | Harbor Hounds (easy) | Pier 9 | No pads; items drop often |
+| 2 | Neon Vipers (normal) | Arcade Alley | Four launch pads |
+| 3 | Sky Pilots (normal) | The Helipad | Launch pads right in the lane, no items |
+| 4 | Iron Monarchs (hard) | Palace Court | Two launch pads, lots of items |
+
+Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Springs, Heavy Hands. Losing a game lets you retry it.
+
+**Debug/testing URL params:** `?autoplay=1` (CPU vs CPU), `?speed=4`, `?seed=N`, `?mute=1`, `?mode=tour|quick|coop|versus`, `?opp=0..3`. In the console, `__hoop.start('quick', 2)` starts a match and `__hoop.advance(n)` steps the simulation.
 
 ## Architecture
 
 - `src/core/`: a deterministic fixed-step simulation (60 Hz, seeded RNG) with no DOM.
-  - `game.ts`: physics, ball states, shots, dunks, passes, punches, scoring, clocks.
-  - `ai.ts`: CPU brains for both sides.
+  - `game.ts`: physics, ball states, shots, dunks, passes, fighting, launch pads, items, scoring, clocks.
+  - `ai.ts`: computer players for both sides.
+  - `teams.ts`: teams, courts and upgrades.
 - `src/client/`:
-  - `render.ts`, `sprites.ts`, `background.ts`: Canvas 2D renderer with procedural characters, parallax city, particles and HUD.
+  - `render.ts`: Canvas 2D renderer: camera, zoom and slow motion, particles, HUD.
+  - `sprites.ts`: characters (big-head figures with mood-driven faces), ball, hoops, pads, items.
+  - `background.ts`: five court themes painted from palettes.
   - `audio.ts`: WebAudio synth for SFX and a music loop.
-  - `input.ts`: keyboard and gamepad.
-- `tests/sim.test.ts`: plays full AI-vs-AI matches headless (no NaN, no stuck balls, sane FG%, games finish, deterministic) and has one test per mechanic (shot window, jab, tackle, dodge, air kick, alley-oop, Mega Slam, Blitz).
+  - `input.ts`: keyboard layouts for one or two players, and gamepads.
+- `src/main.ts`: menus, modes, player switching, tournament flow.
+- `tests/sim.test.ts`: full computer-vs-computer matches on every court, plus one test per mechanic.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
 
 ## Roadmap (proposed)
 
-1. **Court hazards and multi-level hoops:** rooftop vents that launch you, a subway car you can climb, crates for a higher basket.
-2. **Weapons and items:** trash-can lids, skateboards, a conveyor that drops items onto the court.
-3. **Breakable backboards:** super dunks shatter the rim. You get bonus points and a short replacement delay.
-4. **Player switching** on defense, so you always control the defender nearest the ball.
-5. **Story/tournament mode:** a ladder of 6 teams with home courts, upgrades between games, and switching your second player.
-6. **Local 2P (co-op or versus)** on one keyboard or two gamepads, then online play using the deterministic core with rollback.
-7. **Juice pass:** sprite-sheet animation baked from the procedural rig, instant replays of dunks, crowd on the sidewalk.
-8. **Mobile touch controls** and a PWA wrapper.
+1. **Tuning from real play:** knockdown rates, launch-pad strength, computer difficulty.
+2. **Breakable backboards:** big dunks shatter the rim for bonus points and a short replacement delay.
+3. **More stage objects:** things to climb, moving hazards, a conveyor that brings items in.
+4. **Online play** using the deterministic core with rollback.
+5. **Sprite sheets:** bake the code-drawn characters into frame-by-frame animation with smear frames.
+6. **Mobile touch controls** and a PWA wrapper.

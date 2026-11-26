@@ -1,4 +1,4 @@
-import { DUNK_RANGE, HOOP, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
+import { DUNK_RANGE, GRAVITY, HIGH_MIN_Y, HOOP, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
 import { Game, Intent, Player, distXZ } from './game';
 import { makeRng } from './rng';
 import type { Difficulty } from './teams';
@@ -49,12 +49,16 @@ interface Brain {
   gotBallAt: number;
   lastPunch: number;
   lastTackle: number;
+  padUntil: number;
+  padX: number;
+  padZ: number;
 }
 
 const newBrain = (): Brain => ({
   next: 0, tx: 0, tz: 0, sprint: false, action: false, special: false, jump: false,
   tackle: false, ttx: 0, ttz: 0,
   startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
+  padUntil: -9, padX: 0, padZ: 0,
 });
 
 export class AIController {
@@ -85,6 +89,30 @@ export class AIController {
 
     // Reflexes that cannot wait for the next decision tick.
     if (g.phase === 'play') {
+      // In the air off a launch pad with the ball: sky dunk near the rim, otherwise time an air shot.
+      if (has && p.state === 'jump' && p.launched && !p.released) {
+        if (distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 195) {
+          out.shoot = p.y > HIGH_MIN_Y + 8 || p.vy <= 0;
+          return out;
+        }
+        if (p.vy > 0) {
+          b.holding = true;
+          b.shootUntil = now + Math.max(0.03, p.vy / GRAVITY + (this.rng() - 0.5) * 2 * P.jitter);
+          out.shoot = true;
+        }
+        return out;
+      }
+      // Carrying an item with an opponent lined up: throw it.
+      if (!has && p.state === 'move' && g.heldItem(p)) {
+        for (const o of g.opponents(p)) {
+          const dx = o.x - p.x;
+          if (g.canAct(o) && Math.abs(o.z - p.z) < 18 && Math.abs(dx) > 40 && Math.abs(dx) < 400 && this.rng() < 0.15) {
+            out.action = true;
+            out.face = dx > 0 ? 1 : -1;
+            return out;
+          }
+        }
+      }
       // Teammate is in the air at the rim: throw the lob.
       const mate = g.teammate(p);
       if (has && p.state === 'move' && mate.state === 'jump' && mate.y > 8 && mate.vy > -120
@@ -192,6 +220,9 @@ export class AIController {
       return;
     }
 
+    // Already committed to running over a launch pad.
+    if (g.time < b.padUntil) { b.tx = b.padX; b.tz = b.padZ; b.sprint = true; return; }
+
     // Teammate (possibly the human) asked for the ball.
     if (g.passCall[p.team] > 0 && g.canAct(mate) && this.rng() < 0.9) { b.action = true; return; }
 
@@ -214,6 +245,26 @@ export class AIController {
 
     const mateOpen = g.canAct(mate) && this.nearestOpp(mate).d > 70 && this.laneClear(p, mate);
     if (nd < 52 && mateOpen && this.rng() < P.passIQ) { b.action = true; return; }
+
+    // A ready launch pad on the way to the rim: sometimes take it for a sky dunk.
+    if (nd > 45 && this.rng() < 0.3) {
+      let pad: { x: number; z: number } | null = null, best = 170;
+      g.stage.launchers.forEach((l, i) => {
+        if (g.padTimers[i] > 0) return;
+        const toHoop = Math.abs(hx - l.x);
+        if (toHoop > 420 || toHoop > Math.abs(hx - p.x) - 10) return;
+        const dd = distXZ(p.x, p.z, l.x, l.z);
+        if (dd < best) { best = dd; pad = l; }
+      });
+      if (pad) {
+        const l = pad as { x: number; z: number };
+        b.padUntil = g.time + 0.9;
+        b.padX = l.x + dir * 8;
+        b.padZ = l.z;
+        b.tx = b.padX; b.tz = b.padZ; b.sprint = true;
+        return;
+      }
+    }
 
     // Drive toward the rim, slipping away from the nearest defender.
     const dodge = opp ? (opp.z > p.z ? -1 : 1) : 0;

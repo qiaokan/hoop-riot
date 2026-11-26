@@ -10,6 +10,10 @@ export interface PlayerDef {
   special: 'comet' | 'slam';
   /** Full-meter move without the ball: Shockwave (floors everyone nearby) or Blitz (homing tackle). */
   defSpecial: 'shockwave' | 'blitz';
+  /** Jabs in a row needed to knock this player down (default 3). */
+  tough?: number;
+  /** This player's jabs knock down one hit sooner. */
+  heavyHands?: boolean;
   skin: string;
   hair: string;
   hairStyle: 'spiky' | 'flat' | 'afro' | 'mohawk' | 'bald' | 'bun';
@@ -27,6 +31,51 @@ export interface TeamDef {
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
+// ---------------------------------------------------------------- courts
+
+export interface StageDef {
+  /** Launch pads: step on one to be thrown high into the air. */
+  launchers: { x: number; z: number }[];
+  /** Average seconds between item drops; 0 disables items. */
+  itemEvery: number;
+}
+
+export type CourtId = 'rooftop' | 'docks' | 'arcade' | 'helipad' | 'palace';
+
+export interface CourtDef {
+  id: CourtId;
+  name: string;
+  feature: string;
+  stage: StageDef;
+}
+
+export const COURTS: Record<CourtId, CourtDef> = {
+  rooftop: {
+    id: 'rooftop', name: 'The Rooftop', feature: 'Two launch pads, a few items',
+    stage: { launchers: [{ x: 378, z: 95 }, { x: 1122, z: 95 }], itemEvery: 12 },
+  },
+  docks: {
+    id: 'docks', name: 'Pier 9', feature: 'No pads. Crates and cans everywhere',
+    stage: { launchers: [], itemEvery: 6 },
+  },
+  arcade: {
+    id: 'arcade', name: 'Arcade Alley', feature: 'Four launch pads',
+    stage: { launchers: [{ x: 378, z: 95 }, { x: 378, z: 265 }, { x: 1122, z: 95 }, { x: 1122, z: 265 }], itemEvery: 14 },
+  },
+  helipad: {
+    id: 'helipad', name: 'The Helipad', feature: 'Launch pads right in the lane',
+    stage: { launchers: [{ x: 430, z: 180 }, { x: 1070, z: 180 }], itemEvery: 0 },
+  },
+  palace: {
+    id: 'palace', name: 'Palace Court', feature: 'Two launch pads, lots of items',
+    stage: { launchers: [{ x: 378, z: 265 }, { x: 1122, z: 265 }], itemEvery: 9 },
+  },
+};
+
+export const DEFAULT_STAGE: StageDef = COURTS.rooftop.stage;
+
+// ---------------------------------------------------------------- teams
+
 export const HOME_TEAM: TeamDef = {
   name: 'Rooftop Rebels',
   short: 'RBL',
@@ -43,11 +92,14 @@ export interface Opponent {
   team: TeamDef;
   difficulty: Difficulty;
   blurb: string;
+  court: CourtId;
 }
 
+/** In tournament order. */
 export const OPPONENTS: Opponent[] = [
   {
     difficulty: 'easy',
+    court: 'docks',
     blurb: 'Dock workers. Slow, sloppy, but they hit hard.',
     team: {
       name: 'Harbor Hounds',
@@ -63,6 +115,7 @@ export const OPPONENTS: Opponent[] = [
   },
   {
     difficulty: 'normal',
+    court: 'arcade',
     blurb: 'Arcade kids. Quick hands, quicker trash talk.',
     team: {
       name: 'Neon Vipers',
@@ -77,7 +130,24 @@ export const OPPONENTS: Opponent[] = [
     },
   },
   {
+    difficulty: 'normal',
+    court: 'helipad',
+    blurb: 'Stunt flyers. They live above the rim.',
+    team: {
+      name: 'Sky Pilots',
+      short: 'SKY',
+      jersey: '#f4f6fb',
+      trim: '#2a8fe6',
+      shorts: '#27598f',
+      players: [
+        { name: 'Ace', num: 8, speed: 0.72, shoot: 0.72, power: 0.5, jump: 0.95, special: 'comet', defSpecial: 'blitz', skin: '#c68a5e', hair: '#e8552b', hairStyle: 'spiky', build: 0.98 },
+        { name: 'Gale', num: 15, speed: 0.75, shoot: 0.55, power: 0.68, jump: 0.9, special: 'slam', defSpecial: 'shockwave', skin: '#f3d2b3', hair: '#2b2b33', hairStyle: 'bun', build: 1.04 },
+      ],
+    },
+  },
+  {
     difficulty: 'hard',
+    court: 'palace',
     blurb: 'The undefeated kings of the eastside courts.',
     team: {
       name: 'Iron Monarchs',
@@ -92,3 +162,37 @@ export const OPPONENTS: Opponent[] = [
     },
   },
 ];
+
+// ---------------------------------------------------------------- upgrades
+
+export interface Upgrade {
+  id: 'speed' | 'shoot' | 'chin' | 'hype' | 'jump' | 'hands';
+  name: string;
+  desc: string;
+}
+
+export const UPGRADES: Upgrade[] = [
+  { id: 'speed', name: 'QUICK FEET', desc: 'Both players run faster' },
+  { id: 'shoot', name: 'SHARPSHOOTER', desc: 'A bigger green zone on every shot' },
+  { id: 'chin', name: 'IRON CHIN', desc: 'It takes 4 jabs to knock you down' },
+  { id: 'hype', name: 'HYPE MAN', desc: 'Your RIOT meter fills 40% faster' },
+  { id: 'jump', name: 'SPRINGS', desc: 'Jump higher for blocks and rebounds' },
+  { id: 'hands', name: 'HEAVY HANDS', desc: 'Your jabs knock down in 2 hits' },
+];
+
+/** Returns a copy of the team with the given upgrades applied, plus its RIOT-meter rate. */
+export function applyUpgrades(team: TeamDef, ids: string[]): { team: TeamDef; hypeRate: number } {
+  const has = (id: string) => ids.includes(id);
+  const up = (p: PlayerDef): PlayerDef => ({
+    ...p,
+    speed: p.speed + (has('speed') ? 0.2 : 0),
+    shoot: p.shoot + (has('shoot') ? 0.25 : 0),
+    jump: p.jump + (has('jump') ? 0.25 : 0),
+    tough: has('chin') ? 4 : p.tough,
+    heavyHands: has('hands') ? true : p.heavyHands,
+  });
+  return {
+    team: { ...team, players: [up(team.players[0]), up(team.players[1])] },
+    hypeRate: has('hype') ? 1.4 : 1,
+  };
+}

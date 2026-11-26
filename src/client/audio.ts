@@ -151,6 +151,21 @@ export class Sfx {
       case 'oop':
         this.tone(440, 0.22, 'triangle', 0.14, 880);
         break;
+      case 'launch':
+        this.tone(180, 0.3, 'square', 0.12, 900);
+        this.tone(260, 0.25, 'sine', 0.2, 1300);
+        break;
+      case 'item':
+        this.tone(660, 0.06, 'square', 0.08);
+        this.tone(990, 0.08, 'square', 0.08, undefined, 0.06);
+        break;
+      case 'throw':
+        this.noise(0.18, 'bandpass', 900, 0.2, 0.7);
+        break;
+      case 'itemhit':
+        this.noise(0.22, 'bandpass', 1600, 0.6, 1.2);
+        this.tone(300, 0.12, 'square', 0.12, 120);
+        break;
       case 'megaslam':
       case 'blitz':
         this.tone(120, 0.6, 'sawtooth', 0.2, 900);

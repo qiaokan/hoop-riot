@@ -1,19 +1,42 @@
 import { AIController, AI_PARAMS, ACCURACY, AIParams } from './core/ai';
-import { DT } from './core/constants';
-import { Game, Intent } from './core/game';
-import { HOME_TEAM, OPPONENTS } from './core/teams';
+import { DT, TeamId } from './core/constants';
+import { Game, Intent, distXZ } from './core/game';
+import { COURTS, CourtId, HOME_TEAM, OPPONENTS, UPGRADES, Upgrade, applyUpgrades } from './core/teams';
 import { Sfx } from './client/audio';
 import { Input } from './client/input';
 import { Renderer } from './client/render';
 import { roundRect } from './client/sprites';
 import { VIEW_W } from './client/view';
 
-type Scene = 'title' | 'match' | 'paused' | 'results';
+type Mode = 'tour' | 'quick' | 'coop' | 'versus';
+type Scene = 'title' | 'card' | 'match' | 'paused' | 'results' | 'upgrade' | 'champion';
+
+const MODES: { id: Mode; name: string; blurb: string }[] = [
+  { id: 'tour', name: 'STREET TOUR', blurb: 'Beat all four crews. Pick an upgrade after every win.' },
+  { id: 'quick', name: 'QUICK MATCH', blurb: 'One game against the crew of your choice.' },
+  { id: 'coop', name: '2P CO-OP', blurb: 'Two players on one team against the computer.' },
+  { id: 'versus', name: '2P VERSUS', blurb: 'Player against player. Each gets a computer teammate.' },
+];
+
+/** A person at the controls. `pid` is the player they are driving right now. */
+interface Human {
+  slot: 0 | 1;
+  team: TeamId;
+  pid: number;
+  /** Control follows the ball and can be switched by hand (off in co-op, where each person keeps one player). */
+  switching: boolean;
+  swap: boolean;
+  label: string;
+  color: string;
+}
+
+interface Tour { stage: number; upgrades: string[]; owed: number }
 
 const params = new URLSearchParams(location.search);
 const AUTOPLAY = params.get('autoplay') === '1';
 const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1));
 const LENGTHS = [120, 180, 300];
+const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -22,51 +45,166 @@ const sfx = new Sfx();
 if (params.get('mute') === '1') sfx.toggleMute();
 input.onFirstGesture = () => sfx.unlock();
 
+function loadTour(): Tour {
+  try {
+    const t = JSON.parse(localStorage.getItem('hoopriot.tour') ?? 'null');
+    if (t && typeof t.stage === 'number' && Array.isArray(t.upgrades)) {
+      return { stage: Math.max(0, Math.min(OPPONENTS.length - 1, t.stage)), upgrades: t.upgrades.map(String), owed: Number(t.owed) || 0 };
+    }
+  } catch { /* storage blocked or corrupt: start fresh */ }
+  return { stage: 0, upgrades: [], owed: 0 };
+}
+function saveTour() {
+  try { localStorage.setItem('hoopriot.tour', JSON.stringify(tour)); } catch { /* play on without saving */ }
+}
+
+let tour = loadTour();
 let scene: Scene = 'title';
+let mode: Mode = (MODES.find((m) => m.id === params.get('mode'))?.id) ?? 'tour';
 let menuRow = 0;
-let oppIndex = Math.max(0, Math.min(2, Number(params.get('opp') ?? 1) || 0));
-let lenIndex = 1;
+let oppIndex = Math.max(0, Math.min(OPPONENTS.length - 1, Number(params.get('opp') ?? 1) || 0));
+let lenIndex = 0;
 let endTimer = 0;
+let cardTimer = 0;
+let upgradeChoices: Upgrade[] = [];
+let upgradeSel = 0;
 let game: Game;
 let ai: AIController;
-let humanId: number | null = null;
+let humans: Human[] = [];
+let solo = true;
+let lastHolderTeam: TeamId | null = null;
 let seed = Number(params.get('seed') ?? 0) || Math.floor(Math.random() * 1e9);
 
-function newGame(opts: { human: boolean; matchSeconds: number; opp: number }) {
-  const opp = OPPONENTS[opts.opp];
+/** Which opponent the next match is against. */
+function matchOpp(): number {
+  return mode === 'tour' ? tour.stage : oppIndex;
+}
+
+function newGame(kind: Mode | 'attract', opp: number, seconds: number) {
+  const o = OPPONENTS[opp];
   seed = (seed * 1103515245 + 12345) >>> 0;
+  const up = kind === 'tour' ? applyUpgrades(HOME_TEAM, tour.upgrades) : { team: HOME_TEAM, hypeRate: 1 };
+  const court: CourtId = kind === 'attract' ? 'rooftop' : o.court;
   game = new Game({
-    home: HOME_TEAM, away: opp.team, seed, matchSeconds: opts.matchSeconds,
-    accuracy: [1, ACCURACY[opp.difficulty]],
+    home: up.team, away: o.team, seed, matchSeconds: seconds,
+    accuracy: [1, kind === 'versus' ? 1 : ACCURACY[o.difficulty]],
+    stage: COURTS[court].stage,
+    hypeRate: [up.hypeRate, 1],
   });
   const p = new Map<number, AIParams>();
-  for (const pl of game.players) p.set(pl.id, pl.team === 0 ? AI_PARAMS.normal : AI_PARAMS[opp.difficulty]);
+  for (const pl of game.players) p.set(pl.id, pl.team === 0 || kind === 'versus' ? AI_PARAMS.normal : AI_PARAMS[o.difficulty]);
   ai = new AIController(game, p, seed);
-  humanId = opts.human ? 0 : null;
+  const h = (slot: 0 | 1, team: TeamId, pid: number, switching: boolean): Human =>
+    ({ slot, team, pid, switching, swap: false, label: slot === 0 ? 'P1' : 'P2', color: slot === 0 ? P1_COLOR : P2_COLOR });
+  if (kind === 'attract' || AUTOPLAY) humans = [];
+  else if (kind === 'coop') humans = [h(0, 0, 0, false), h(1, 0, 1, false)];
+  else if (kind === 'versus') humans = [h(0, 0, 0, true), h(1, 1, 2, true)];
+  else humans = [h(0, 0, 0, true)];
+  solo = humans.length < 2;
+  lastHolderTeam = null;
+  renderer.setCourt(court);
   renderer.reset();
+  input.clearTaps();
   endTimer = 0;
 }
 
-function startMatch() {
-  newGame({ human: !AUTOPLAY, matchSeconds: LENGTHS[lenIndex], opp: oppIndex });
-  scene = 'match';
+function attract() {
+  newGame('attract', matchOpp(), 9999);
 }
 
-// Attract mode behind the title screen.
-newGame({ human: false, matchSeconds: 9999, opp: oppIndex });
-if (AUTOPLAY) startMatch();
+/** Show the matchup card, then play. */
+function goCard() {
+  if (mode === 'tour' && tour.owed > 0) { openUpgrades(); return; }
+  newGame(mode, matchOpp(), LENGTHS[lenIndex]);
+  cardTimer = 0;
+  scene = AUTOPLAY ? 'match' : 'card';
+}
 
-function intents(): Intent[] {
-  const human = humanId !== null ? input.intent() : null;
-  return game.players.map((p) => (p.id === humanId && human ? human : ai.intent(p)));
+function openUpgrades() {
+  const pool = UPGRADES.filter((u) => !tour.upgrades.includes(u.id));
+  // Deterministic shuffle from the match seed.
+  let s = seed;
+  for (let i = pool.length - 1; i > 0; i--) {
+    s = (s * 1103515245 + 12345) >>> 0;
+    const j = s % (i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  upgradeChoices = pool.slice(0, 3);
+  upgradeSel = 0;
+  if (!upgradeChoices.length) { tour.owed = 0; saveTour(); goCard(); return; }
+  scene = 'upgrade';
+}
+
+function toTitle() {
+  scene = 'title';
+  menuRow = 0;
+  attract();
+}
+
+attract();
+if (AUTOPLAY) { mode = 'quick'; goCard(); }
+
+// ------------------------------------------------------------------ simulation
+
+/** Hand a person a different player. Buttons already held do not fire again on the new player. */
+function setControl(h: Human, pid: number, held: Intent) {
+  h.pid = pid;
+  const p = game.players[pid];
+  p.prev.shoot = held.shoot;
+  p.prev.action = held.action;
+  p.prev.special = held.special;
 }
 
 function stepSim() {
-  game.step(intents());
+  const held = humans.map((h) => input.intent(h.slot, solo));
+  const holder = game.holder();
+  const holderTeam = holder ? holder.team : null;
+  humans.forEach((h, i) => {
+    if (!h.switching) { h.swap = false; return; }
+    const cur = game.players[h.pid];
+    const mate = game.teammate(cur);
+    const pass = game.ball.pass;
+    let target = h.pid;
+    if (holder && holder.team === h.team) target = holder.id; // you always drive your ball carrier
+    else if (game.ball.state === 'pass' && pass && game.players[pass.to].team === h.team) target = pass.to;
+    else if (h.swap) target = mate.id;
+    else if (cur.state === 'down' && game.canAct(mate)) target = mate.id;
+    else if (holder && holderTeam !== lastHolderTeam) {
+      // The other team just got the ball: take whichever of your players is clearly closer to it.
+      if (game.canAct(mate) && distXZ(mate.x, mate.z, holder.x, holder.z) + 40 < distXZ(cur.x, cur.z, holder.x, holder.z)) target = mate.id;
+    }
+    h.swap = false;
+    if (target !== h.pid) setControl(h, target, held[i]);
+  });
+  lastHolderTeam = holderTeam;
+
+  const byPid = new Map(humans.map((h, i) => [h.pid, held[i]]));
+  game.step(game.players.map((p) => byPid.get(p.id) ?? ai.intent(p)));
   for (const e of game.drainEvents()) {
     renderer.onEvent(e, game);
     if (scene === 'match') sfx.play(e);
   }
+}
+
+function titleRows(): string[] {
+  return mode === 'tour' ? ['mode', 'length', 'start', 'reset'] : ['mode', 'opp', 'length', 'start'];
+}
+
+function onMatchOver() {
+  if (AUTOPLAY) { goCard(); return; }
+  if (mode === 'tour' && game.winner === 0) {
+    // Bank the win right away so a closed tab does not lose it.
+    if (tour.stage >= OPPONENTS.length - 1) {
+      tour = { stage: 0, upgrades: [], owed: 0 };
+      saveTour();
+      scene = 'champion';
+      return;
+    }
+    tour.stage++;
+    tour.owed = 1;
+    saveTour();
+  }
+  scene = 'results';
 }
 
 function handleMenu() {
@@ -74,25 +212,54 @@ function handleMenu() {
     if (k === 'mute') { sfx.toggleMute(); continue; }
     if (k === 'music') { sfx.toggleMusic(); continue; }
     switch (scene) {
-      case 'title':
-        if (k === 'up') menuRow = (menuRow + 2) % 3;
-        else if (k === 'down') menuRow = (menuRow + 1) % 3;
+      case 'title': {
+        const rows = titleRows();
+        const row = rows[menuRow];
+        if (k === 'up') menuRow = (menuRow + rows.length - 1) % rows.length;
+        else if (k === 'down') menuRow = (menuRow + 1) % rows.length;
         else if (k === 'left' || k === 'right') {
           const d = k === 'left' ? -1 : 1;
-          if (menuRow === 0) oppIndex = (oppIndex + d + 3) % 3;
-          if (menuRow === 1) lenIndex = (lenIndex + d + LENGTHS.length) % LENGTHS.length;
-        } else if (k === 'confirm') startMatch();
+          if (row === 'mode') {
+            const i = MODES.findIndex((m) => m.id === mode);
+            mode = MODES[(i + d + MODES.length) % MODES.length].id;
+            attract();
+          } else if (row === 'opp') {
+            oppIndex = (oppIndex + d + OPPONENTS.length) % OPPONENTS.length;
+            attract();
+          } else if (row === 'length') lenIndex = (lenIndex + d + LENGTHS.length) % LENGTHS.length;
+        } else if (k === 'confirm') {
+          if (row === 'reset') { tour = { stage: 0, upgrades: [], owed: 0 }; saveTour(); menuRow = 0; attract(); }
+          else goCard();
+        }
+        break;
+      }
+      case 'card':
+        if (k === 'confirm') scene = 'match';
+        else if (k === 'back') toTitle();
         break;
       case 'match':
         if (k === 'pause' || k === 'back') scene = 'paused';
         break;
       case 'paused':
         if (k === 'pause' || k === 'confirm') scene = 'match';
-        else if (k === 'back') { scene = 'title'; newGame({ human: false, matchSeconds: 9999, opp: oppIndex }); }
+        else if (k === 'back') toTitle();
         break;
       case 'results':
-        if (k === 'confirm') startMatch();
-        else if (k === 'back') { scene = 'title'; newGame({ human: false, matchSeconds: 9999, opp: oppIndex }); }
+        if (k === 'confirm') goCard();
+        else if (k === 'back') toTitle();
+        break;
+      case 'upgrade':
+        if (k === 'left') upgradeSel = (upgradeSel + upgradeChoices.length - 1) % upgradeChoices.length;
+        else if (k === 'right') upgradeSel = (upgradeSel + 1) % upgradeChoices.length;
+        else if (k === 'confirm') {
+          tour.upgrades.push(upgradeChoices[upgradeSel].id);
+          tour.owed = 0;
+          saveTour();
+          goCard();
+        }
+        break;
+      case 'champion':
+        if (k === 'confirm' || k === 'back') toTitle();
         break;
     }
   }
@@ -105,28 +272,39 @@ function frame(now: number) {
   last = now;
   input.poll();
   handleMenu();
+  for (const h of humans) if (input.takeSwap(h.slot, solo)) h.swap = true;
 
   if (scene === 'match' || scene === 'title') {
-    acc += dt * SPEED;
+    acc += dt * SPEED * (scene === 'match' ? renderer.timeScale() : 1);
     let n = 0;
     while (acc >= DT && n < 40) { stepSim(); acc -= DT; n++; }
     if (scene === 'match' && game.phase === 'end') {
       endTimer += dt;
-      if (endTimer > 2.6) scene = AUTOPLAY ? (startMatch(), 'match') : 'results';
+      if (endTimer > 2.6) onMatchOver();
     }
+  } else if (scene === 'card') {
+    cardTimer += dt;
+    if (cardTimer > 4) scene = 'match';
   }
 
-  const dim = scene === 'title' ? 0.45 : scene === 'paused' ? 0.55 : scene === 'results' ? 0.65 : 0;
-  renderer.render(game, dt, humanId, { hud: scene === 'match' || scene === 'paused', dim });
+  const dim = { title: 0.45, card: 0.7, match: 0, paused: 0.6, results: 0.68, upgrade: 0.78, champion: 0.6 }[scene];
+  const views = scene === 'title' ? [] : humans.map((h) => ({ pid: h.pid, label: h.label, color: h.color }));
+  renderer.render(game, dt, views, { hud: scene === 'match' || scene === 'paused', dim });
   const ctx = renderer.ctx;
-  if (scene === 'title') drawTitle(ctx, now / 1000);
-  if (scene === 'paused') drawPause(ctx);
-  if (scene === 'results') drawResults(ctx);
+  const t = now / 1000;
+  if (scene === 'title') drawTitle(ctx, t);
+  else if (scene === 'card') drawCard(ctx, t);
+  else if (scene === 'paused') drawPause(ctx);
+  else if (scene === 'results') drawResults(ctx);
+  else if (scene === 'upgrade') drawUpgrades(ctx, t);
+  else if (scene === 'champion') drawChampion(ctx, t);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 // ------------------------------------------------------------------ overlays
+
+const FONT = '"Trebuchet MS", sans-serif';
 
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, font: string, color: string, align: CanvasTextAlign = 'center', stroke = 0) {
   ctx.font = font;
@@ -136,81 +314,143 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, fo
   ctx.fillText(s, x, y);
 }
 
+function panel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, alpha = 0.85) {
+  ctx.fillStyle = `rgba(12,8,28,${alpha})`;
+  roundRect(ctx, x, y, w, h, 12);
+  ctx.fill();
+}
+
 function drawTitle(ctx: CanvasRenderingContext2D, t: number) {
   ctx.save();
-  ctx.translate(VIEW_W / 2, 118);
+  ctx.translate(VIEW_W / 2, 92);
   ctx.rotate(-0.05);
   const pulse = 1 + Math.sin(t * 3) * 0.02;
   ctx.scale(pulse, pulse);
   ctx.shadowColor = '#ff4fa3';
   ctx.shadowBlur = 24;
-  text(ctx, 'HOOP RIOT', 0, 0, 'italic 900 96px "Trebuchet MS", sans-serif', '#ffe14a', 'center', 12);
+  text(ctx, 'HOOP RIOT', 0, 0, `italic 900 84px ${FONT}`, '#ffe14a', 'center', 12);
   ctx.shadowBlur = 0;
-  text(ctx, '2-ON-2 STREET BALL · NO REFS · NO FOULS', 0, 38, 'bold 18px "Trebuchet MS", sans-serif', '#ffffff', 'center', 5);
+  text(ctx, '2-ON-2 STREET BALL · NO REFS · NO FOULS', 0, 32, `bold 17px ${FONT}`, '#ffffff', 'center', 5);
   ctx.restore();
 
-  const opp = OPPONENTS[oppIndex];
-  const rows = [
-    `OPPONENT:  ◀ ${opp.team.name.toUpperCase()} (${opp.difficulty.toUpperCase()}) ▶`,
-    `LENGTH:  ◀ ${LENGTHS[lenIndex] / 60} MIN ▶`,
-    'START GAME  (ENTER)',
-  ];
-  const bx = VIEW_W / 2 - 250, by = 205;
-  ctx.fillStyle = 'rgba(12,8,28,0.85)';
-  roundRect(ctx, bx, by, 500, 150, 12);
-  ctx.fill();
+  const opp = OPPONENTS[matchOpp()];
+  const m = MODES.find((x) => x.id === mode)!;
+  const rows = titleRows();
+  const label = (row: string): string => {
+    if (row === 'mode') return `MODE:  ◀ ${m.name} ▶`;
+    if (row === 'opp') return `OPPONENT:  ◀ ${opp.team.name.toUpperCase()} (${mode === 'versus' ? 'PLAYER 2' : opp.difficulty.toUpperCase()}) ▶`;
+    if (row === 'length') return `LENGTH:  ◀ ${LENGTHS[lenIndex] / 60} MIN ▶`;
+    if (row === 'reset') return 'RESET TOUR PROGRESS';
+    if (mode === 'tour') return tour.owed > 0 ? 'PICK YOUR UPGRADE  (ENTER)' : `START GAME ${tour.stage + 1} OF ${OPPONENTS.length}  (ENTER)`;
+    return 'START GAME  (ENTER)';
+  };
+  const bx = VIEW_W / 2 - 260, by = 150;
+  panel(ctx, bx, by, 520, 16 + rows.length * 36);
   rows.forEach((r, i) => {
     const sel = i === menuRow;
-    const y = by + 38 + i * 40;
+    const y = by + 34 + i * 36;
     if (sel) {
       ctx.fillStyle = 'rgba(255,225,74,0.16)';
-      roundRect(ctx, bx + 14, y - 24, 472, 34, 8);
+      roundRect(ctx, bx + 14, y - 23, 492, 32, 8);
       ctx.fill();
     }
-    text(ctx, r, VIEW_W / 2, y, `bold ${i === 2 ? 22 : 18}px "Trebuchet MS", sans-serif`, sel ? '#ffe14a' : '#cfd3e6');
+    const big = r === 'start';
+    text(ctx, label(r), VIEW_W / 2, y, `bold ${big ? 20 : r === 'reset' ? 14 : 17}px ${FONT}`, sel ? '#ffe14a' : r === 'reset' ? '#9aa0b5' : '#cfd3e6');
   });
-  text(ctx, opp.blurb, VIEW_W / 2, by + 172, 'italic 15px "Trebuchet MS", sans-serif', '#ffffff', 'center', 4);
+  const court = COURTS[opp.court];
+  const info = mode === 'tour'
+    ? `Next: ${opp.team.name} at ${court.name}. ${tour.upgrades.length ? `Upgrades: ${tour.upgrades.map((id) => UPGRADES.find((u) => u.id === id)?.name ?? id).join(', ')}` : m.blurb}`
+    : `${m.blurb} ${court.name}: ${court.feature.toLowerCase()}.`;
+  text(ctx, info, VIEW_W / 2, by + 16 + rows.length * 36 + 22, `italic 14px ${FONT}`, '#ffffff', 'center', 4);
 
-  drawControls(ctx, 384);
+  drawControls(ctx, 356, mode === 'coop' || mode === 'versus');
 }
 
-function drawControls(ctx: CanvasRenderingContext2D, y: number) {
-  const lines = [
-    ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
-    ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K'],
-    ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K while jumping'],
-    ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
-  ];
-  ctx.fillStyle = 'rgba(12,8,28,0.8)';
-  roundRect(ctx, VIEW_W / 2 - 360, y, 720, 118, 10);
-  ctx.fill();
-  lines.forEach((l, i) => {
-    const yy = y + 25 + i * 25;
-    text(ctx, l[0], VIEW_W / 2 - 340, yy, 'bold 13px "Trebuchet MS", sans-serif', '#ffe14a', 'left');
-    text(ctx, l[1], VIEW_W / 2 - 220, yy, '13px "Trebuchet MS", sans-serif', '#ffffff', 'left');
-    text(ctx, l[2], VIEW_W / 2 + 140, yy, 'bold 13px "Trebuchet MS", sans-serif', '#ffe14a', 'left');
-    text(ctx, l[3], VIEW_W / 2 + 270, yy, '13px "Trebuchet MS", sans-serif', '#ffffff', 'left');
-  });
-  text(ctx, 'Gamepad: stick move · A shoot · X pass / punch / tackle · B dodge / special · RB sprint · Start pause', VIEW_W / 2, y + 133, '12px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3);
+/** Controls reference: one person, or two people sharing the keyboard. */
+function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
+  const cx = VIEW_W / 2;
+  panel(ctx, cx - 380, y, 760, 132, 0.82);
+  if (!twoP) {
+    const lines = [
+      ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
+      ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K'],
+      ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K in the air'],
+      ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
+      ['SWITCH PLAYER', 'Q (on defense)', 'THROW ITEM', 'K (walk over it first)'],
+    ];
+    lines.forEach((l, i) => {
+      const yy = y + 26 + i * 23;
+      text(ctx, l[0], cx - 362, yy, `bold 13px ${FONT}`, '#ffe14a', 'left');
+      text(ctx, l[1], cx - 232, yy, `13px ${FONT}`, '#ffffff', 'left');
+      text(ctx, l[2], cx + 100, yy, `bold 13px ${FONT}`, '#ffe14a', 'left');
+      text(ctx, l[3], cx + 215, yy, `13px ${FONT}`, '#ffffff', 'left');
+    });
+    text(ctx, 'P pause · M mute · N music · Gamepad: stick, A shoot, X pass / hit, B dodge / special, RB sprint, LB switch',
+      cx, y + 150, `12px ${FONT}`, '#cfd3e6', 'center', 3);
+  } else {
+    const rows = [
+      ['', 'PLAYER 1', 'PLAYER 2'],
+      ['MOVE', 'W A S D', 'Arrow keys'],
+      ['SPRINT', 'Left Shift', 'Right Shift'],
+      ['SHOOT / JUMP', 'J', ',  (comma)'],
+      ['PASS / HIT / THROW', 'K', '.  (period)'],
+      ['DODGE / SPECIAL', 'L', '/  (slash)'],
+      ['SWITCH PLAYER', 'Q', '\'  (quote)'],
+    ];
+    rows.forEach((r, i) => {
+      const yy = y + 21 + i * 17.5;
+      const head = i === 0;
+      text(ctx, r[0], cx - 362, yy, `bold 12.5px ${FONT}`, '#cfd3e6', 'left');
+      text(ctx, r[1], cx - 110, yy, `${head ? 'bold ' : ''}12.5px ${FONT}`, head ? P1_COLOR : '#ffffff', 'left');
+      text(ctx, r[2], cx + 130, yy, `${head ? 'bold ' : ''}12.5px ${FONT}`, head ? P2_COLOR : '#ffffff', 'left');
+    });
+    text(ctx, 'Tackle: sprint + pass key · Air kick: pass key in the air · With one gamepad, it goes to Player 2',
+      cx, y + 150, `12px ${FONT}`, '#cfd3e6', 'center', 3);
+  }
+}
+
+function drawCard(ctx: CanvasRenderingContext2D, t: number) {
+  const [A, B] = game.teams;
+  const opp = OPPONENTS[matchOpp()];
+  const court = COURTS[opp.court];
+  const head = mode === 'tour' ? `GAME ${tour.stage + 1} OF ${OPPONENTS.length}` : MODES.find((m) => m.id === mode)!.name;
+  text(ctx, head, VIEW_W / 2, 120, `bold 22px ${FONT}`, '#ffffff', 'center', 5);
+  text(ctx, A.name.toUpperCase(), VIEW_W / 2 - 40, 210, `italic 900 44px ${FONT}`, A.jersey, 'right', 9);
+  text(ctx, 'VS', VIEW_W / 2, 208, `italic 900 30px ${FONT}`, '#ffe14a', 'center', 7);
+  text(ctx, B.name.toUpperCase(), VIEW_W / 2 + 40, 210, `italic 900 44px ${FONT}`, B.jersey, 'left', 9);
+  text(ctx, `${A.players[0].name} & ${A.players[1].name}`, VIEW_W / 2 - 40, 240, `bold 16px ${FONT}`, '#ffffff', 'right', 4);
+  text(ctx, `${B.players[0].name} & ${B.players[1].name}`, VIEW_W / 2 + 40, 240, `bold 16px ${FONT}`, '#ffffff', 'left', 4);
+  panel(ctx, VIEW_W / 2 - 300, 280, 600, 104);
+  text(ctx, court.name.toUpperCase(), VIEW_W / 2, 312, `bold 22px ${FONT}`, '#ffe14a');
+  text(ctx, court.feature, VIEW_W / 2, 338, `16px ${FONT}`, '#ffffff');
+  text(ctx, mode === 'versus' ? 'The gold upper hoop is worth a bonus point.' : opp.blurb, VIEW_W / 2, 364, `italic 15px ${FONT}`, '#cfd3e6');
+  if (mode === 'tour' && tour.upgrades.length) {
+    text(ctx, `Your upgrades: ${tour.upgrades.map((id) => UPGRADES.find((u) => u.id === id)?.name ?? id).join(' · ')}`,
+      VIEW_W / 2, 416, `bold 14px ${FONT}`, '#7dff6a', 'center', 4);
+  }
+  if (Math.floor(t * 2) % 2 === 0) text(ctx, 'PRESS ENTER', VIEW_W / 2, 470, `bold 18px ${FONT}`, '#ffe14a', 'center', 5);
 }
 
 function drawPause(ctx: CanvasRenderingContext2D) {
-  text(ctx, 'PAUSED', VIEW_W / 2, 140, 'italic 900 64px "Trebuchet MS", sans-serif', '#ffe14a', 'center', 10);
-  text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 180, 'bold 16px "Trebuchet MS", sans-serif', '#ffffff', 'center', 4);
-  drawControls(ctx, 230);
+  text(ctx, 'PAUSED', VIEW_W / 2, 120, `italic 900 64px ${FONT}`, '#ffe14a', 'center', 10);
+  text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 156, `bold 16px ${FONT}`, '#ffffff', 'center', 4);
+  drawControls(ctx, 186, !solo);
   const tips = [
-    'A jab only staggers. To take the ball: land 3 jabs, tackle, or hit someone in the air.',
-    'Sprint at the rim and shoot to dunk. Jump at the rim without the ball and your teammate throws a lob.',
-    'Pass (K) when your teammate jumps at the rim for an alley-oop. P / M: pause / mute.',
+    'A jab only staggers. To take the ball: land 3 jabs, tackle, throw an item, or hit someone in the air.',
+    'Yellow pads launch you. In the air: shoot near the rim for a 3-point sky dunk, or hold and release a shot.',
+    'Shots from high in the air go in the gold upper hoop for a bonus point.',
+    'Pass when your teammate jumps at the rim for an alley-oop.',
   ];
-  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 410 + i * 20, '13px "Trebuchet MS", sans-serif', '#cfd3e6', 'center', 3));
+  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 372 + i * 20, `13px ${FONT}`, '#cfd3e6', 'center', 3));
 }
 
 function drawResults(ctx: CanvasRenderingContext2D) {
   const [A, B] = game.teams;
   const won = game.winner === 0;
-  text(ctx, won ? 'YOU WIN!' : 'YOU LOSE', VIEW_W / 2, 110, 'italic 900 72px "Trebuchet MS", sans-serif', won ? '#ffe14a' : '#ff5a5a', 'center', 10);
-  text(ctx, `${A.name}  ${game.score[0]}  —  ${game.score[1]}  ${B.name}`, VIEW_W / 2, 158, 'bold 24px "Trebuchet MS", sans-serif', '#ffffff', 'center', 6);
+  const title = mode === 'versus' ? (won ? 'PLAYER 1 WINS!' : 'PLAYER 2 WINS!') : won ? 'YOU WIN!' : 'YOU LOSE';
+  const color = mode === 'versus' ? (won ? P1_COLOR : P2_COLOR) : won ? '#ffe14a' : '#ff5a5a';
+  text(ctx, title, VIEW_W / 2, 100, `italic 900 68px ${FONT}`, color, 'center', 10);
+  text(ctx, `${A.name}  ${game.score[0]}  —  ${game.score[1]}  ${B.name}`, VIEW_W / 2, 146, `bold 24px ${FONT}`, '#ffffff', 'center', 6);
   const s = game.stats;
   const pct = (m: number, a: number) => (a ? `${m}/${a} (${Math.round((m / a) * 100)}%)` : '0/0');
   const rows: [string, string, string][] = [
@@ -221,25 +461,77 @@ function drawResults(ctx: CanvasRenderingContext2D) {
     ['Blocks', String(s[0].blocks), String(s[1].blocks)],
     ['Knockdowns', String(s[0].kos), String(s[1].kos)],
   ];
-  ctx.fillStyle = 'rgba(12,8,28,0.85)';
-  roundRect(ctx, VIEW_W / 2 - 260, 185, 520, 230, 12);
-  ctx.fill();
-  text(ctx, A.short, VIEW_W / 2 - 40, 215, 'bold 15px "Trebuchet MS", sans-serif', A.jersey, 'right');
-  text(ctx, B.short, VIEW_W / 2 + 200, 215, 'bold 15px "Trebuchet MS", sans-serif', B.jersey, 'right');
+  panel(ctx, VIEW_W / 2 - 260, 172, 520, 230);
+  text(ctx, A.short, VIEW_W / 2 - 40, 202, `bold 15px ${FONT}`, A.jersey, 'right', 3);
+  text(ctx, B.short, VIEW_W / 2 + 200, 202, `bold 15px ${FONT}`, B.jersey, 'right', 3);
   rows.forEach((r, i) => {
-    const y = 247 + i * 27;
-    text(ctx, r[0], VIEW_W / 2 - 230, y, '15px "Trebuchet MS", sans-serif', '#cfd3e6', 'left');
-    text(ctx, r[1], VIEW_W / 2 - 40, y, 'bold 15px "Trebuchet MS", sans-serif', '#ffffff', 'right');
-    text(ctx, r[2], VIEW_W / 2 + 200, y, 'bold 15px "Trebuchet MS", sans-serif', '#ffffff', 'right');
+    const y = 234 + i * 27;
+    text(ctx, r[0], VIEW_W / 2 - 230, y, `15px ${FONT}`, '#cfd3e6', 'left');
+    text(ctx, r[1], VIEW_W / 2 - 40, y, `bold 15px ${FONT}`, '#ffffff', 'right');
+    text(ctx, r[2], VIEW_W / 2 + 200, y, `bold 15px ${FONT}`, '#ffffff', 'right');
   });
-  text(ctx, 'Enter: rematch  ·  Esc: back to title', VIEW_W / 2, 450, 'bold 16px "Trebuchet MS", sans-serif', '#ffe14a', 'center', 4);
+  const next = mode === 'tour'
+    ? (won ? 'Enter: pick an upgrade  ·  Esc: back to title' : 'Enter: try again  ·  Esc: back to title')
+    : 'Enter: rematch  ·  Esc: back to title';
+  text(ctx, next, VIEW_W / 2, 440, `bold 16px ${FONT}`, '#ffe14a', 'center', 4);
+}
+
+function drawUpgrades(ctx: CanvasRenderingContext2D, t: number) {
+  text(ctx, 'PICK AN UPGRADE', VIEW_W / 2, 110, `italic 900 56px ${FONT}`, '#ffe14a', 'center', 10);
+  text(ctx, `Next up: ${OPPONENTS[tour.stage].team.name} at ${COURTS[OPPONENTS[tour.stage].court].name}`,
+    VIEW_W / 2, 150, `bold 17px ${FONT}`, '#ffffff', 'center', 4);
+  const w = 230, gap = 26, n = upgradeChoices.length;
+  const x0 = VIEW_W / 2 - (n * w + (n - 1) * gap) / 2;
+  upgradeChoices.forEach((u, i) => {
+    const sel = i === upgradeSel;
+    const x = x0 + i * (w + gap), y = 200 - (sel ? 8 + Math.sin(t * 6) * 3 : 0);
+    ctx.fillStyle = sel ? 'rgba(255,225,74,0.95)' : 'rgba(30,24,56,0.95)';
+    roundRect(ctx, x, y, w, 170, 14);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.25)';
+    ctx.stroke();
+    text(ctx, u.name, x + w / 2, y + 52, `900 22px ${FONT}`, sel ? '#1a1030' : '#ffe14a');
+    // Wrap the description onto two lines.
+    const words = u.desc.split(' ');
+    let a = '', b = '';
+    for (const wd of words) (a.length + wd.length < 20 && !b ? (a += `${wd} `) : (b += `${wd} `));
+    text(ctx, a.trim(), x + w / 2, y + 96, `16px ${FONT}`, sel ? '#1a1030' : '#ffffff');
+    text(ctx, b.trim(), x + w / 2, y + 118, `16px ${FONT}`, sel ? '#1a1030' : '#ffffff');
+  });
+  text(ctx, '◀ ▶ choose  ·  Enter: take it', VIEW_W / 2, 440, `bold 16px ${FONT}`, '#ffe14a', 'center', 4);
+}
+
+function drawChampion(ctx: CanvasRenderingContext2D, t: number) {
+  ctx.save();
+  ctx.translate(VIEW_W / 2, 150);
+  ctx.rotate(-0.04);
+  const pulse = 1 + Math.sin(t * 4) * 0.03;
+  ctx.scale(pulse, pulse);
+  text(ctx, 'STREET CHAMPIONS!', 0, 0, `italic 900 70px ${FONT}`, '#ffe14a', 'center', 12);
+  ctx.restore();
+  text(ctx, `Final: ${game.teams[0].name} ${game.score[0]} — ${game.score[1]} ${game.teams[1].name}`, VIEW_W / 2, 220, `bold 22px ${FONT}`, '#ffffff', 'center', 6);
+  text(ctx, `You beat ${OPPONENTS.map((o) => o.team.name).join(', ')}.`, VIEW_W / 2, 262, `17px ${FONT}`, '#ffffff', 'center', 4);
+  text(ctx, 'Every court in the city is yours.', VIEW_W / 2, 290, `italic 17px ${FONT}`, '#cfd3e6', 'center', 4);
+  text(ctx, 'Enter: back to title', VIEW_W / 2, 440, `bold 16px ${FONT}`, '#ffe14a', 'center', 4);
 }
 
 // Debug / test hook.
 (window as unknown as { __hoop: unknown }).__hoop = {
   get game() { return game; },
   get scene() { return scene; },
-  start: startMatch,
+  get humans() { return humans; },
+  get tour() { return tour; },
+  /** Start a match right away, skipping the matchup card. */
+  start(m: Mode = 'quick', opp = oppIndex) {
+    mode = m;
+    oppIndex = opp;
+    newGame(m, matchOpp(), LENGTHS[lenIndex]);
+    scene = 'match';
+  },
   /** Advance the simulation by n fixed steps using live input + AI (for automated testing). */
   advance(n: number) { for (let i = 0; i < n; i++) stepSim(); },
+  /** Jump to a scene (for automated screenshots). */
+  show(s: Scene) { if (s === 'upgrade') openUpgrades(); else scene = s; },
+  finish: onMatchOver,
 };

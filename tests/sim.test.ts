@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { AIController, AI_PARAMS, ACCURACY, AIParams } from '../src/core/ai';
-import { COURT, HOOP, attackHoopX } from '../src/core/constants';
+import { COURT, HIGH_MIN_Y, HOOP, attackHoopX } from '../src/core/constants';
 import { Game, GameEventType, Intent, NO_INTENT } from '../src/core/game';
-import { HOME_TEAM, OPPONENTS } from '../src/core/teams';
+import { COURTS, HOME_TEAM, OPPONENTS, StageDef, applyUpgrades } from '../src/core/teams';
 
 function runMatch(seed: number, oppIndex: number, seconds = 120) {
   const opp = OPPONENTS[oppIndex];
-  const game = new Game({ home: HOME_TEAM, away: opp.team, seed, matchSeconds: seconds, accuracy: [1, ACCURACY[opp.difficulty]] });
+  const game = new Game({ home: HOME_TEAM, away: opp.team, seed, matchSeconds: seconds, accuracy: [1, ACCURACY[opp.difficulty]], stage: COURTS[opp.court].stage });
   const params = new Map<number, AIParams>();
   for (const p of game.players) params.set(p.id, p.team === 0 ? AI_PARAMS.normal : AI_PARAMS[opp.difficulty]);
   const ai = new AIController(game, params, seed);
@@ -35,7 +35,7 @@ function runMatch(seed: number, oppIndex: number, seconds = 120) {
 }
 
 describe('AI vs AI simulation', () => {
-  for (const [seed, opp] of [[1, 0], [2, 1], [3, 2], [4, 1], [5, 0], [6, 2]] as const) {
+  for (const [seed, opp] of [[1, 0], [2, 1], [3, 2], [4, 3], [5, 0], [6, 3], [7, 2], [8, 1]] as const) {
     it(`finishes a match cleanly (seed ${seed}, opponent ${opp})`, () => {
       const { game, counts, maxLooseSteps, oops } = runMatch(seed, opp);
       const [a, b] = game.score;
@@ -45,7 +45,7 @@ describe('AI vs AI simulation', () => {
         `FG ${s[0].fgm}/${s[0].fga} vs ${s[1].fgm}/${s[1].fga}`,
         `dunks ${s[0].dunks}/${s[1].dunks} KOs ${s[0].kos}/${s[1].kos} blocks ${s[0].blocks}/${s[1].blocks} steals ${s[0].steals}/${s[1].steals}`,
         `viol ${counts.violation ?? 0} passes ${counts.pass ?? 0} lobs ${counts.oop ?? 0} oops ${oops} tackles ${counts.tackle ?? 0} dodges ${counts.spin ?? 0}`,
-        `specials c${counts.special ?? 0} m${counts.megaslam ?? 0} s${counts.shockwave ?? 0} b${counts.blitz ?? 0} maxLoose ${(maxLooseSteps / 60).toFixed(1)}s`);
+        `launches ${counts.launch ?? 0} throws ${counts.throw ?? 0} specials c${counts.special ?? 0} m${counts.megaslam ?? 0} s${counts.shockwave ?? 0} b${counts.blitz ?? 0} maxLoose ${(maxLooseSteps / 60).toFixed(1)}s`);
       expect(game.phase).toBe('end');
       expect(game.winner).not.toBeNull();
       expect(a + b).toBeGreaterThan(12);
@@ -68,8 +68,10 @@ describe('AI vs AI simulation', () => {
 // ---------------------------------------------------------------- mechanics
 
 /** A live game with team 0 on offense, player 0 holding the ball, and everyone else parked far away. */
-function scene(seed = 1) {
-  const game = new Game({ home: HOME_TEAM, away: OPPONENTS[1].team, seed, matchSeconds: 600 });
+const BARE: StageDef = { launchers: [], itemEvery: 0 };
+
+function scene(seed = 1, stage: StageDef = BARE, home = HOME_TEAM) {
+  const game = new Game({ home, away: OPPONENTS[1].team, seed, matchSeconds: 600, stage });
   game.phase = 'play';
   game.resetFormation(0);
   const [me, mate, d1, d2] = game.players;
@@ -216,5 +218,79 @@ describe('mechanics', () => {
     let down = false;
     run(game, 60, (f) => ({ 2: { special: f === 0 } }), () => { down ||= me.state === 'down'; return down; });
     expect(down).toBe(true);
+  });
+
+  it('a launch pad throws a player high into the air', () => {
+    const { game, me } = scene(1, { launchers: [{ x: 700, z: 180 }], itemEvery: 0 });
+    me.x = 700; me.z = 180;
+    let top = 0;
+    run(game, 80, () => ({}), () => { top = Math.max(top, me.y); return false; });
+    expect(top).toBeGreaterThan(HIGH_MIN_Y + 50);
+    expect(game.padTimers[0]).toBeGreaterThan(0);
+  });
+
+  it('an air shot from a launch pad goes in the upper hoop for a bonus point', () => {
+    const hx = attackHoopX(0);
+    const { game, me } = scene(1, { launchers: [{ x: hx - 260, z: 95 }], itemEvery: 0 });
+    me.x = hx - 260; me.z = 95;
+    let release = false;
+    run(game, 400, (f) => {
+      if (me.state === 'shoot' && me.vy <= 0) release = true;
+      return { 0: { shoot: f >= 3 && !release } };
+    }, () => game.score[0] > 0 || game.ball.state === 'loose');
+    expect(game.score[0]).toBe(3);
+  });
+
+  it('a sky dunk off a launch pad is worth 3', () => {
+    const hx = attackHoopX(0);
+    const { game, me } = scene(1, { launchers: [{ x: hx - 260, z: 95 }], itemEvery: 0 });
+    me.x = hx - 330; me.z = 95;
+    const seen: string[] = [];
+    run(game, 300, () => {
+      const near = Math.hypot(me.x - hx, me.z - HOOP.z) < 200;
+      return { 0: { mx: me.launched || me.state === 'dunk' ? 0 : 1, sprint: true, shoot: me.launched && near && me.y > HIGH_MIN_Y + 10 } };
+    }, () => {
+      for (const e of game.drainEvents()) if (e.type === 'dunk' && e.text) seen.push(e.text);
+      return game.score[0] > 0;
+    });
+    expect(seen).toContain('SKY DUNK!');
+    expect(game.score[0]).toBe(3);
+  });
+
+  it('a thrown item knocks an opponent down', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 900; d1.z = 180; d1.facing = -1;
+    game.items.push({ id: 99, kind: 0, x: 900, y: 0, z: 180, vx: 0, vy: 0, state: 'ground', holder: null, team: null, spin: 0 });
+    run(game, 3, () => ({}));
+    expect(game.heldItem(d1)).not.toBeNull();
+    let down = false;
+    run(game, 60, (f) => ({ 2: { action: f === 0, face: -1 } }), () => { down ||= me.state === 'down'; return down; });
+    expect(down).toBe(true);
+    expect(game.items.length).toBe(0);
+  });
+
+  it('upgrades change how the game plays', () => {
+    const up = applyUpgrades(HOME_TEAM, ['chin', 'shoot', 'hype']);
+    expect(up.hypeRate).toBeGreaterThan(1);
+    const base = scene();
+    base.me.x = attackHoopX(0) - 300; base.me.z = HOOP.z;
+    const tuned = scene(1, BARE, up.team);
+    tuned.me.x = attackHoopX(0) - 300; tuned.me.z = HOOP.z;
+    expect(tuned.game.shotWindow(tuned.me)).toBeGreaterThan(base.game.shotWindow(base.me));
+    // Iron Chin: three jabs no longer floor the carrier.
+    const { game, me, d1 } = tuned;
+    me.x = 700;
+    let hits = 0, down = false;
+    run(game, 400, (f) => {
+      d1.x = me.x - 30; d1.z = me.z; d1.facing = 1;
+      return { 2: { action: f % 8 === 0, face: 1 } };
+    }, () => {
+      for (const e of game.drainEvents()) if (e.type === 'hit') hits++;
+      down ||= me.state === 'down';
+      return down;
+    });
+    expect(down).toBe(true);
+    expect(hits).toBe(3);
   });
 });

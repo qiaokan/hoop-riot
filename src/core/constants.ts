@@ -31,6 +31,14 @@ export const DUNK_TIME = 0.55;
 export const SHOT_CLOCK = 15;
 export const DEFAULT_MATCH_SECONDS = 180;
 export const HAND_Y = 36;
+/** Rim height of the upper hoop above each basket. */
+export const HIGH_RIM_Y = 235;
+/** A shot or dunk started above this height goes at the upper hoop. */
+export const HIGH_MIN_Y = 100;
+/** Upward speed a launch pad gives a player. */
+export const LAUNCH_V = 800;
+/** Seconds a launch pad needs to recharge after use. */
+export const PAD_RECHARGE = 4;
 
 export type TeamId = 0 | 1;
 

@@ -1,7 +1,8 @@
-import { COURT, GRAVITY, HOOP, TeamId } from '../core/constants';
-import type { Game, GameEvent } from '../core/game';
+import { COURT, GRAVITY, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/constants';
+import type { Game, GameEvent, Player } from '../core/game';
+import type { CourtId } from '../core/teams';
 import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './background';
-import { drawBall, drawHoopBack, drawHoopFront, drawPlayer, drawShadow, roundRect } from './sprites';
+import { Mood, drawBall, drawHoopBack, drawHoopFront, drawItem, drawPad, drawPlayer, drawShadow, roundRect } from './sprites';
 import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, sy } from './view';
 
 interface Particle {
@@ -16,26 +17,48 @@ interface Particle {
 interface Popup { text: string; x: number; y: number; z: number; life: number; color: string; size: number }
 interface Banner { text: string; sub?: string; life: number; max: number; color: string }
 
+/** A player a person is controlling, and the tag drawn over their head. */
+export interface HumanView { pid: number; label: string; color: string }
+
 const HIT_WORDS = ['POW!', 'WHAM!', 'BAM!', 'SMACK!', 'THUD!'];
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
+  private backdrops = new Map<CourtId, Backdrop>();
   private bg: Backdrop;
   camX = 0;
   private shake = 0;
   private particles: Particle[] = [];
   private popups: Popup[] = [];
   private banner: Banner | null = null;
-  private netSway: [number, number] = [0, 0];
+  /** Net sway per hoop: index = side * 2 + (upper hoop ? 1 : 0). */
+  private netSway = [0, 0, 0, 0];
   private flash = 0;
   private scale = 1;
   private rnd = Math.random;
+  // Dramatic camera: a short zoom toward a point, and slow motion.
+  private zoom = 1;
+  private zoomT = 0;
+  private fx = VIEW_W / 2;
+  private fy = VIEW_H / 2;
+  private slowT = 0;
+  private lastSwishHigh = false;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
-    this.bg = buildBackdrop();
+    this.bg = this.backdrop('rooftop');
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  private backdrop(court: CourtId): Backdrop {
+    let b = this.backdrops.get(court);
+    if (!b) { b = buildBackdrop(court); this.backdrops.set(court, b); }
+    return b;
+  }
+
+  setCourt(court: CourtId) {
+    this.bg = this.backdrop(court);
   }
 
   resize() {
@@ -54,16 +77,33 @@ export class Renderer {
     this.banner = null;
     this.shake = 0;
     this.flash = 0;
+    this.zoom = 1;
+    this.zoomT = 0;
+    this.slowT = 0;
   }
 
   showBanner(text: string, color = '#ffe14a', sub?: string, life = 1.4) {
     this.banner = { text, sub, life, max: life, color };
   }
 
+  /** How fast the simulation should run right now (below 1 during slow motion). */
+  timeScale(): number {
+    return this.slowT > 0 ? 0.35 : 1;
+  }
+
+  private drama(e: { x: number; y: number; z: number }, zoomFor: number, slowFor: number) {
+    this.fx = Math.max(VIEW_W * 0.25, Math.min(VIEW_W * 0.75, e.x - this.camX));
+    this.fy = Math.max(150, Math.min(380, sy(e.z, e.y)));
+    this.zoomT = Math.max(this.zoomT, zoomFor);
+    this.slowT = Math.max(this.slowT, slowFor);
+  }
+
   // ------------------------------------------------------------ events → FX
 
   onEvent(e: GameEvent, game: Game) {
     const teamColor = (t?: TeamId) => (t === undefined ? '#ffffff' : game.teams[t].trim);
+    const net = (high: boolean) => (e.x < COURT.midX ? 0 : 2) + (high ? 1 : 0);
+    const high = e.y > (HOOP.rimY + HIGH_RIM_Y) / 2;
     switch (e.type) {
       case 'hit':
         this.burst(e, 9, '#fff6a8', 'spark', 220);
@@ -76,30 +116,35 @@ export class Renderer {
         this.shake = Math.max(this.shake, 9);
         break;
       case 'swish':
-        this.netSway[e.x < COURT.midX ? 0 : 1] = 1;
+        this.netSway[net(high)] = 1;
+        this.lastSwishHigh = high;
         break;
       case 'rim':
-        this.netSway[e.x < COURT.midX ? 0 : 1] = 0.5;
+        this.netSway[net(high)] = 0.5;
         this.burst(e, 5, '#ffb15c', 'spark', 120);
         break;
       case 'score': {
         this.burst(e, 26, teamColor(e.team), 'confetti', 260);
         this.popup(e.text ?? `+${e.points}`, { ...e, y: e.y + 40 }, teamColor(e.team), 20);
-        if (e.points === 3) this.showBanner('FROM DOWNTOWN!', teamColor(e.team), '3 POINTS');
+        if (this.lastSwishHigh) this.showBanner('UPPER HOOP!', '#ffcf3f', `${e.points} POINTS`);
+        else if (e.points === 3) this.showBanner('FROM DOWNTOWN!', teamColor(e.team), '3 POINTS');
+        this.lastSwishHigh = false;
         break;
       }
       case 'dunk':
-        this.netSway[e.x < COURT.midX ? 0 : 1] = 1.4;
+        this.netSway[net(high)] = 1.4;
         this.burst(e, 30, '#ffffff', 'spark', 380);
         this.ring(e, '#ffe14a');
         this.shake = Math.max(this.shake, 12);
         this.flash = 0.35;
         this.showBanner(e.text ?? 'SLAM DUNK!', e.points === 3 ? '#ffe14a' : '#ff6a26', e.points === 3 ? '3 POINTS' : undefined);
+        this.drama(e, 0.9, 0.55);
         break;
       case 'megaslam':
         this.flash = 0.5;
         this.ring(e, '#ffe14a');
         this.showBanner(e.text ?? 'MEGA SLAM!', '#ffe14a', game.teams[e.team ?? 0].name.toUpperCase());
+        this.drama(e, 0.5, 0.3);
         break;
       case 'blitz':
         this.flash = 0.35;
@@ -116,10 +161,27 @@ export class Renderer {
       case 'oop':
         this.popup('LOB!', e, '#ffe14a', 16);
         break;
+      case 'launch':
+        this.burst({ ...e, y: 4 }, 12, '#ffd23f', 'spark', 260);
+        this.ring({ ...e, y: 4 }, '#ffd23f');
+        this.popup('BOING!', { ...e, y: 40 }, '#ffd23f', 17);
+        break;
+      case 'item':
+        this.popup('GOT IT!', e, '#ffffff', 13);
+        break;
+      case 'throw':
+        this.burst(e, 4, 'rgba(220,220,230,0.8)', 'dust', 80);
+        break;
+      case 'itemhit':
+        this.burst(e, 14, '#d8c9a8', 'spark', 260);
+        this.popup('CRASH!', e, '#ffb347', 17);
+        this.shake = Math.max(this.shake, 6);
+        break;
       case 'block':
         this.burst(e, 12, '#9ef0ff', 'spark', 240);
         this.popup(e.text ?? 'BLOCK!', e, '#9ef0ff', 20);
         this.shake = Math.max(this.shake, 5);
+        this.drama(e, 0.5, 0.3);
         break;
       case 'steal':
       case 'fumble':
@@ -135,6 +197,7 @@ export class Renderer {
         this.flash = 0.5;
         this.ring(e, '#ff8a2a');
         this.showBanner(e.text ?? 'SPECIAL!', '#ff8a2a', game.teams[e.team ?? 0].name.toUpperCase());
+        this.drama(e, 0.5, 0.3);
         break;
       case 'shockwave':
         this.ring(e, '#9ef0ff');
@@ -161,7 +224,7 @@ export class Renderer {
       case 'land':
       case 'jump':
         this.burst({ ...e, y: 2 }, 4, 'rgba(200,200,210,0.7)', 'dust', 60);
-        if (e.text) this.popup(e.text, { ...e, y: 90 }, '#ff6a26', 16);
+        if (e.text) this.popup(e.text, { ...e, y: e.y + 90 }, '#ff6a26', 16);
         break;
       default:
         break;
@@ -194,7 +257,24 @@ export class Renderer {
 
   // ------------------------------------------------------------ frame
 
-  render(game: Game, dt: number, humanId: number | null, opts: { hud: boolean; dim?: number }) {
+  /** How a player should look right now: face and whether they are celebrating. */
+  private look(game: Game, p: Player): { mood: Mood; celebrate: boolean } {
+    switch (p.state) {
+      case 'down': return { mood: 'dizzy', celebrate: false };
+      case 'stun': return { mood: 'pain', celebrate: false };
+      case 'punch': case 'tackle': case 'airkick': return { mood: 'angry', celebrate: false };
+      case 'dunk': case 'hang': return { mood: 'happy', celebrate: false };
+      case 'shoot': case 'spin': return { mood: 'focus', celebrate: false };
+      default: break;
+    }
+    let side: TeamId | null = null;
+    if (game.phase === 'end') side = game.winner;
+    else if (game.phase === 'score' && game.lastScorer !== null) side = game.players[game.lastScorer].team;
+    if (side !== null) return p.team === side ? { mood: 'happy', celebrate: true } : { mood: 'sad', celebrate: false };
+    return { mood: 'normal', celebrate: false };
+  }
+
+  render(game: Game, dt: number, humans: HumanView[], opts: { hud: boolean; dim?: number }) {
     const ctx = this.ctx;
     this.updateCamera(game, dt);
     this.updateFx(game, dt);
@@ -207,6 +287,11 @@ export class Renderer {
     }
     ctx.save();
     ctx.translate(ox, oy);
+    if (this.zoom > 1.001) {
+      ctx.translate(this.fx, this.fy);
+      ctx.scale(this.zoom, this.zoom);
+      ctx.translate(-this.fx, -this.fy);
+    }
     const camX = this.camX;
 
     // Backdrop layers.
@@ -215,50 +300,65 @@ export class Renderer {
     this.drawLayer(this.bg.near, camX * NEAR_PARALLAX, this.bg.nearW);
     ctx.drawImage(this.bg.court, camX * LAYER_RES, 0, VIEW_W * LAYER_RES, VIEW_H * LAYER_RES, 0, 0, VIEW_W, VIEW_H);
 
+    // Launch pads sit on the floor.
+    game.stage.launchers.forEach((pad, i) => {
+      drawPad(ctx, pad.x - camX, sy(pad.z), 1 - game.padTimers[i] / PAD_RECHARGE, game.time);
+    });
+
     drawHoopBack(ctx, HOOP.leftX, camX);
     drawHoopBack(ctx, HOOP.rightX, camX);
 
     // Shadows.
-    for (const p of game.players) drawShadow(ctx, p.x - camX, p.z, p.y, 18 * p.def.build);
+    for (const p of game.players) drawShadow(ctx, p.x - camX, p.z, p.y, 21 * p.def.build);
     const b = game.ball;
-    drawShadow(ctx, b.x - camX, b.z, b.y, 9);
+    drawShadow(ctx, b.x - camX, b.z, b.y, 10);
+    for (const it of game.items) if (it.state !== 'held') drawShadow(ctx, it.x - camX, it.z, it.y, 10);
 
     // Depth-sorted entities.
+    const labels = new Map(humans.map((h) => [h.pid, h]));
     const items: { z: number; draw: () => void }[] = [];
     for (const p of game.players) {
+      const look = this.look(game, p);
+      const h = labels.get(p.id);
       items.push({
         z: p.z,
-        draw: () => drawPlayer(ctx, p, game.teams[p.team], p.x - camX, game.time, p.id === humanId, b.holder === p.id),
+        draw: () => drawPlayer(ctx, p, game.teams[p.team], p.x - camX, game.time, {
+          ...look, hasBall: b.holder === p.id, label: h?.label, labelColor: h?.color,
+        }),
       });
     }
     items.push({ z: b.z + 1, draw: () => drawBall(ctx, b.x - camX, sy(b.z, b.y), b.spin, !!b.shot?.special) });
+    for (const it of game.items) {
+      items.push({ z: it.z + 2, draw: () => drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.state === 'thrown' ? it.spin : 0) });
+    }
     items.sort((a, c) => a.z - c.z);
     for (const it of items) it.draw();
 
-    drawHoopFront(ctx, HOOP.leftX, camX, this.netSway[0], game.time);
-    drawHoopFront(ctx, HOOP.rightX, camX, this.netSway[1], game.time);
+    for (const [hx, side] of [[HOOP.leftX, 0], [HOOP.rightX, 2]] as const) {
+      drawHoopFront(ctx, hx, camX, HIGH_RIM_Y, this.netSway[side + 1], game.time);
+      drawHoopFront(ctx, hx, camX, HOOP.rimY, this.netSway[side], game.time);
+    }
 
-    // Release-timing bar for the human's jump shot. The marker sweeps left to right over the
+    // Release-timing bar for each person's jump shot. The marker sweeps left to right over the
     // jump; the green zone in the middle is the sure-make window and shrinks under pressure.
-    if (humanId !== null) {
-      const h = game.players[humanId];
-      if (h.state === 'shoot' && !h.released && b.holder === h.id) {
-        const tA = game.apexTime(h);
-        const W = game.shotWindow(h);
-        const off = Math.abs(h.vy) / GRAVITY;
-        const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
-        const bw = 64, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 130;
-        const zone = Math.max(2, (W / tA) * bw);
-        const inZone = off <= W;
-        ctx.fillStyle = 'rgba(12,8,28,0.9)';
-        ctx.fillRect(bx - 2, by - 2, bw + 4, 12);
-        ctx.fillStyle = '#5a2030';
-        ctx.fillRect(bx, by, bw, 8);
-        ctx.fillStyle = inZone ? '#b6ff9a' : '#3fbf5a';
-        ctx.fillRect(bx + bw / 2 - zone / 2, by, zone, 8);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(bx + pos * bw - 1.5, by - 3, 3, 14);
-      }
+    for (const hv of humans) {
+      const h = game.players[hv.pid];
+      if (h.state !== 'shoot' || h.released || b.holder !== h.id) continue;
+      const tA = game.apexTime(h);
+      const W = game.shotWindow(h);
+      const off = Math.abs(h.vy) / GRAVITY;
+      const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
+      const bw = 70, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 146;
+      const zone = Math.max(2, (W / tA) * bw);
+      const inZone = off <= W;
+      ctx.fillStyle = 'rgba(12,8,28,0.9)';
+      ctx.fillRect(bx - 2, by - 2, bw + 4, 13);
+      ctx.fillStyle = '#5a2030';
+      ctx.fillRect(bx, by, bw, 9);
+      ctx.fillStyle = inZone ? '#b6ff9a' : '#3fbf5a';
+      ctx.fillRect(bx + bw / 2 - zone / 2, by, zone, 9);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx + pos * bw - 1.5, by - 3, 3, 15);
     }
 
     this.drawParticles(camX);
@@ -269,12 +369,19 @@ export class Renderer {
       ctx.fillStyle = `rgba(255,250,230,${this.flash * 0.6})`;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
+    if (this.slowT > 0) {
+      // Letterbox bars during slow motion.
+      const k = Math.min(1, this.slowT / 0.15);
+      ctx.fillStyle = 'rgba(8,5,18,0.85)';
+      ctx.fillRect(0, 0, VIEW_W, 26 * k);
+      ctx.fillRect(0, VIEW_H - 26 * k, VIEW_W, 26 * k);
+    }
     if (opts.dim) {
       ctx.fillStyle = `rgba(10,6,24,${opts.dim})`;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
     if (opts.hud) {
-      this.drawHud(game, humanId);
+      this.drawHud(game, humans);
       this.drawBanner();
     }
   }
@@ -288,7 +395,7 @@ export class Renderer {
     const b = game.ball;
     let target = b.x - VIEW_W / 2;
     const h = game.holder();
-    if (h) target += (h.facing * 80);
+    if (h) target += h.facing * 80;
     target = Math.max(0, Math.min(COURT.len - VIEW_W, target));
     const k = 1 - Math.exp(-dt * 4);
     this.camX += (target - this.camX) * k;
@@ -297,11 +404,15 @@ export class Renderer {
   private updateFx(game: Game, dt: number) {
     this.shake = Math.max(0, this.shake - dt * 30);
     this.flash = Math.max(0, this.flash - dt * 1.6);
-    this.netSway = [Math.max(0, this.netSway[0] - dt * 1.5), Math.max(0, this.netSway[1] - dt * 1.5)];
+    this.netSway = this.netSway.map((v) => Math.max(0, v - dt * 1.5));
+    this.zoomT = Math.max(0, this.zoomT - dt);
+    this.slowT = Math.max(0, this.slowT - dt);
+    this.zoom += ((this.zoomT > 0 ? 1.22 : 1) - this.zoom) * (1 - Math.exp(-dt * 9));
     if (this.banner) {
       this.banner.life -= dt;
       if (this.banner.life <= 0) this.banner = null;
     }
+    const fxDt = dt * this.timeScale();
     // Comet trail.
     const b = game.ball;
     if (b.shot?.special) {
@@ -313,10 +424,20 @@ export class Renderer {
         });
       }
     }
+    // Speed lines behind a Mega Slam or Blitz.
+    for (const p of game.players) {
+      const mega = p.state === 'dunk' && p.dunk?.kind === 'mega';
+      if (!mega && !(p.state === 'tackle' && p.blitz)) continue;
+      this.particles.push({
+        x: p.x, y: p.y + 30 + this.rnd() * 40, z: p.z,
+        vx: -p.facing * 200, vy: 0, vz: 0,
+        life: 0, max: 0.25, color: mega ? '#ffe14a' : '#ff4fa3', size: 3, kind: 'spark', grav: 0,
+      });
+    }
     for (const p of this.particles) {
-      p.life += dt;
-      p.vy -= p.grav * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      p.life += fxDt;
+      p.vy -= p.grav * fxDt;
+      p.x += p.vx * fxDt; p.y += p.vy * fxDt; p.z += p.vz * fxDt;
       if (p.kind === 'confetti' && p.y < 4) { p.y = 4; p.vx *= 0.8; p.vy = 0; }
     }
     this.particles = this.particles.filter((p) => p.life < p.max);
@@ -366,7 +487,7 @@ export class Renderer {
 
   // ------------------------------------------------------------ HUD
 
-  private drawHud(game: Game, humanId: number | null) {
+  private drawHud(game: Game, humans: HumanView[]) {
     const ctx = this.ctx;
     const [A, B] = game.teams;
     // Scoreboard.
@@ -383,8 +504,12 @@ export class Renderer {
     ctx.fillStyle = A.trim; ctx.fillText(A.short, x + 30, y + 30);
     ctx.fillStyle = B.trim; ctx.fillText(B.short, x + w - 30, y + 30);
     ctx.font = '900 26px "Trebuchet MS", sans-serif';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(10,6,24,0.75)';
     ctx.fillStyle = '#ffffff';
+    ctx.strokeText(String(game.score[0]), x + 74, y + 35);
     ctx.fillText(String(game.score[0]), x + 74, y + 35);
+    ctx.strokeText(String(game.score[1]), x + w - 74, y + 35);
     ctx.fillText(String(game.score[1]), x + w - 74, y + 35);
     const t = Math.ceil(game.clock);
     const clock = game.suddenDeath ? 'OT' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
@@ -403,20 +528,23 @@ export class Renderer {
     else { ctx.moveTo(px, y + 25); ctx.lineTo(px - 7, y + 20); ctx.lineTo(px - 7, y + 30); }
     ctx.fill();
 
-    // Hype meters.
+    // RIOT meters.
     this.meter(16, VIEW_H - 34, game.hype[0], A.jersey, `${A.name.toUpperCase()} RIOT`, 'left', game.time);
     this.meter(VIEW_W - 216, VIEW_H - 34, game.hype[1], B.jersey, `${B.name.toUpperCase()} RIOT`, 'right', game.time);
-    if (humanId !== null) {
-      const h = game.players[humanId];
+
+    // Stamina for each person: first on the left, second on the right.
+    humans.slice(0, 2).forEach((hv, i) => {
+      const h = game.players[hv.pid];
+      const bx = i === 0 ? 16 : VIEW_W - 216;
       ctx.fillStyle = 'rgba(12,8,28,0.7)';
-      ctx.fillRect(16, VIEW_H - 46, 200, 5);
+      ctx.fillRect(bx, VIEW_H - 46, 200, 5);
       ctx.fillStyle = h.stamina > 0.3 ? '#7dff6a' : '#ff5a5a';
-      ctx.fillRect(16, VIEW_H - 46, 200 * h.stamina, 5);
+      ctx.fillRect(i === 0 ? bx : bx + 200 * (1 - h.stamina), VIEW_H - 46, 200 * h.stamina, 5);
       ctx.font = 'bold 9px "Trebuchet MS", sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#cfd3e6';
-      ctx.fillText('STAMINA', 16, VIEW_H - 50);
-    }
+      ctx.textAlign = i === 0 ? 'left' : 'right';
+      ctx.fillStyle = hv.color;
+      ctx.fillText(`${hv.label} · ${h.def.name.toUpperCase()} · STAMINA`, i === 0 ? bx : bx + 200, VIEW_H - 50);
+    });
   }
 
   private meter(x: number, y: number, v: number, color: string, label: string, align: 'left' | 'right', time: number) {
@@ -430,8 +558,13 @@ export class Renderer {
     ctx.fillRect(align === 'left' ? x : x + w - fw, y, fw, h);
     ctx.font = 'bold 10px "Trebuchet MS", sans-serif';
     ctx.textAlign = align;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(10,6,24,0.8)';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(full ? 'RIOT READY — SPECIAL!' : label, align === 'left' ? x + 4 : x + w - 4, y + 11);
+    const text = full ? 'RIOT READY — SPECIAL!' : label;
+    const tx = align === 'left' ? x + 4 : x + w - 4;
+    ctx.strokeText(text, tx, y + 11);
+    ctx.fillText(text, tx, y + 11);
   }
 
   private drawBanner() {
@@ -444,7 +577,7 @@ export class Renderer {
     const k = Math.min(inK, outK);
     ctx.save();
     ctx.globalAlpha = k;
-    ctx.translate(VIEW_W / 2, 170);
+    ctx.translate(VIEW_W / 2, 130);
     const s = 0.6 + 0.4 * inK + (inK < 1 ? 0.3 * (1 - inK) : 0);
     ctx.scale(s, s);
     ctx.rotate(-0.04);
