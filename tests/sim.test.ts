@@ -66,7 +66,9 @@ describe('AI vs AI simulation', () => {
     console.log(`overall FG ${(pct * 100).toFixed(0)}%  knockdowns per team per match ${(totals.kos / totals.games / 2).toFixed(1)}`);
     expect(pct).toBeGreaterThan(0.45);
     expect(pct).toBeLessThan(0.93);
-    expect(totals.kos / totals.games / 2).toBeLessThan(16);
+    // Player-caused knockdowns only. The toys (bats, bombs, rides) add sources, and across eight matches this
+    // figure moves by a couple either way with any change, so the bound has headroom.
+    expect(totals.kos / totals.games / 2).toBeLessThan(18);
   });
 
   it('is deterministic for a given seed', () => {
@@ -272,7 +274,7 @@ describe('mechanics', () => {
     const { game, me, d1 } = scene();
     me.x = 700; me.z = 180;
     d1.x = 900; d1.z = 180; d1.facing = -1;
-    game.items.push({ id: 99, kind: 0, x: 900, y: 0, z: 180, vx: 0, vy: 0, state: 'ground', holder: null, team: null, spin: 0 });
+    game.items.push(game.toys.makeItem('can', 900, 0, 180));
     run(game, 3, () => ({}));
     expect(game.heldItem(d1)).not.toBeNull();
     let down = false;

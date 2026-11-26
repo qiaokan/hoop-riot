@@ -33,11 +33,24 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 
 // ---------------------------------------------------------------- courts
 
+export type ItemKind = 'can' | 'cone' | 'crate' | 'bomb' | 'bat' | 'banana' | 'hammer' | 'ext' | 'magnet' | 'shoes';
+export type HazardKind = 'car' | 'dogs' | 'wrecker' | 'bumpers' | 'wind';
+export type EventKind = 'lowgrav' | 'rain' | 'ufo' | 'ironball' | 'bombball' | 'bigball';
+export type RideKind = 'board' | 'tank' | 'heli';
+
 export interface StageDef {
-  /** Launch pads: step on one to be thrown high into the air. */
-  launchers: { x: number; z: number }[];
+  /** Launch pads: step on one to be thrown high into the air. A pad with `kick` is a catapult: it also flings you toward the hoop you attack. */
+  launchers: { x: number; z: number; kick?: number }[];
   /** Average seconds between item drops; 0 disables items. */
   itemEvery: number;
+  /** Which items drop here (default: all of them). */
+  items?: ItemKind[];
+  /** Moving dangers and court gimmicks. */
+  hazards?: HazardKind[];
+  /** Timed events that can strike during a match. */
+  events?: EventKind[];
+  /** Vehicles parked on the court. */
+  rides?: { kind: RideKind; x: number; z: number }[];
 }
 
 export type CourtId = 'rooftop' | 'docks' | 'arcade' | 'helipad' | 'palace';
@@ -51,24 +64,40 @@ export interface CourtDef {
 
 export const COURTS: Record<CourtId, CourtDef> = {
   rooftop: {
-    id: 'rooftop', name: 'The Rooftop', feature: 'Two launch pads, a few items',
-    stage: { launchers: [{ x: 378, z: 95 }, { x: 1122, z: 95 }], itemEvery: 12 },
+    id: 'rooftop', name: 'The Rooftop', feature: 'Launch pads, a skateboard, every item',
+    stage: {
+      launchers: [{ x: 378, z: 95 }, { x: 1122, z: 95 }], itemEvery: 11,
+      events: ['lowgrav', 'rain', 'bigball'], rides: [{ kind: 'board', x: 750, z: 300 }],
+    },
   },
   docks: {
-    id: 'docks', name: 'Pier 9', feature: 'No pads. Crates and cans everywhere',
-    stage: { launchers: [], itemEvery: 6 },
+    id: 'docks', name: 'Pier 9', feature: 'Traffic! Cars, guard dogs, bombs and bats',
+    stage: {
+      launchers: [], itemEvery: 8, items: ['can', 'crate', 'bomb', 'bat', 'banana', 'hammer', 'ext'],
+      hazards: ['car', 'dogs'], events: ['rain', 'ironball'],
+    },
   },
   arcade: {
-    id: 'arcade', name: 'Arcade Alley', feature: 'Four launch pads',
-    stage: { launchers: [{ x: 378, z: 95 }, { x: 378, z: 265 }, { x: 1122, z: 95 }, { x: 1122, z: 265 }], itemEvery: 14 },
+    id: 'arcade', name: 'Arcade Alley', feature: 'Pinball bumpers, four launch pads',
+    stage: {
+      launchers: [{ x: 378, z: 95 }, { x: 378, z: 265 }, { x: 1122, z: 95 }, { x: 1122, z: 265 }], itemEvery: 11,
+      hazards: ['bumpers'], events: ['bombball', 'bigball', 'lowgrav'], rides: [{ kind: 'board', x: 750, z: 180 }],
+    },
   },
   helipad: {
-    id: 'helipad', name: 'The Helipad', feature: 'Launch pads right in the lane',
-    stage: { launchers: [{ x: 430, z: 180 }, { x: 1070, z: 180 }], itemEvery: 0 },
+    id: 'helipad', name: 'The Helipad', feature: 'A helicopter, catapults, gusts of wind',
+    stage: {
+      launchers: [{ x: 430, z: 180, kick: 300 }, { x: 1070, z: 180, kick: 300 }], itemEvery: 13,
+      items: ['bomb', 'magnet', 'shoes', 'bat', 'banana'],
+      hazards: ['wind'], events: ['ufo', 'lowgrav'], rides: [{ kind: 'heli', x: 750, z: 60 }],
+    },
   },
   palace: {
-    id: 'palace', name: 'Palace Court', feature: 'Two launch pads, lots of items',
-    stage: { launchers: [{ x: 378, z: 265 }, { x: 1122, z: 265 }], itemEvery: 9 },
+    id: 'palace', name: 'Palace Court', feature: 'A tank, a wrecking ball, lots of items',
+    stage: {
+      launchers: [{ x: 378, z: 265 }, { x: 1122, z: 265 }], itemEvery: 11,
+      hazards: ['wrecker'], events: ['ufo', 'ironball', 'bombball'], rides: [{ kind: 'tank', x: 750, z: 300 }],
+    },
   },
 };
 

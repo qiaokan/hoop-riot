@@ -28,10 +28,10 @@ One player:
 |---|---|---|
 | Move | WASD / arrows | Left stick / D-pad |
 | Sprint | Shift | RB / RT |
-| Shoot / jump | J or Space: hold to jump, let go when the marker is in the green | A |
-| Pass (with ball) / punch combo (without) / throw (holding an item) | K | X |
+| Shoot / jump / get off a ride | J or Space: hold to jump, let go when the marker is in the green | A |
+| Pass (with ball) / punch combo (without) / use an item (holding one) / fire (on a ride) | K | X |
 | Grab | Run or walk into an opponent, or press K while touching one (not while holding the ball) | Same |
-| In a grab | K: knee strike. Left or right + K: throw that way | X |
+| In a grab | K: knee strike. Left or right + K: throw that way. Up + K: throw them at the hoop | X |
 | Running tackle | Sprint + K without the ball | RB + X |
 | Air kick | K while jumping | X in the air |
 | Dodge (cannot be hit) | L | B / Y |
@@ -77,7 +77,58 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 **The stage**
 - **Upper hoop:** every basket has a gold hoop above the normal one. A shot let go high in the air goes at it for a bonus point (3 from inside the arc, 4 from outside).
 - **Launch pads:** step on a yellow pad to be thrown into the air. Press shoot near the rim for a 3-point sky dunk, or hold and release for an air shot at the upper hoop. A pad needs 4 seconds to recharge.
-- **Items:** trash cans, cones and crates drop onto the court. Walk over one with empty hands to pick it up, then press K to throw it.
+- **Breakable rims:** every dunk strains the rim. After six it tears off for 6 seconds: shots drop through the gap and dunks find nothing to dunk on. The gold hoop above still works.
+- **Teammate boost:** jump while touching a teammate who is standing still (and your side is not defending) and they throw you as high as a launch pad.
+
+**Hitting the ball**
+- A punch, kick or tackle that reaches a loose ball knocks it away, and swats an opponent's shot or pass. A ball that was just struck staggers the first opponent it hits, and they cannot catch it until it touches the floor.
+- **Juggles:** a body still in the air after a knockdown can be hit again, twice at most.
+- **Body dunk:** in a grab, Up + K throws the victim at the hoop you attack. A body that drops through the rim is 1 point (and counts as two dunks against the rim). Sure from close in, a gamble from further out. Any body that falls through a hoop counts, however it got there.
+
+**Items** drop onto the court. Walk over one with empty hands to pick it up, then press K.
+
+| Item | What K does |
+|---|---|
+| Trash can, cone, crate | Throw it: knocks down the first opponent it hits |
+| Bomb | Throw it. The fuse lights when you pick it up (3.5 s) and it blows up on contact, on the floor, or in your hands. A blast launches everyone nearby, friend or foe, flings the ball (a flung ball can score), and sets off other bombs |
+| Bat | Swing (3 swings): sends an opponent flying. Hit a loose ball and it is a line drive at your hoop that can score from anywhere, and floors anyone in its way |
+| Hammer | Slam (2 slams): launches every opponent around you and pops a loose ball into the air |
+| Fire extinguisher | Spray (4 sprays): shoves opponents and the ball away |
+| Banana | Throw it; it lies on the floor and sends the next runner sliding (either team) |
+| Magnet | Worn for 9 s: a loose ball nearby rolls to you |
+| Spring shoes | Worn for 10 s: every jump is a launch-pad jump, so jump shots go at the gold hoop |
+
+Swing at the right moment as a thrown item arrives and you catch it instead of being hit.
+
+**Rides:** walk into one to get on. K uses it, J gets off; it runs out after a few seconds and comes back later.
+
+| Ride | Court | What it does |
+|---|---|---|
+| Skateboard | Arcade Alley | Twice running speed; runs opponents over. K is a burst of speed. J with the ball goes straight into a shot or a dunk |
+| Tank | Palace Court | Slow. Punches bounce off; only heavy hits and blasts wear down its 4 armour, and then it blows up. K fires an exploding shell. Loaded with the ball, K fires the ball at the hoop (less accurate from far away) |
+| Helicopter | The Helipad | Flies over everyone. K drops a bomb. J bails out; with the ball near the rim that is a 3-point sky dunk |
+
+**Hazards**
+
+| Hazard | Court | What it does |
+|---|---|---|
+| Car, guard dogs | Pier 9 | A lane flashes red, then something comes down it and runs over anyone still there |
+| Pinball bumpers | Arcade Alley | Kick away players and the ball |
+| Wind, catapults | The Helipad | Gusts push the ball and anyone in the air. The pads in the lane also fling you toward the hoop you attack |
+| Wrecking ball | Palace Court | Swings the length of the middle lane |
+
+**Events** start on their own every 20 seconds or so and last 12–14 seconds, one at a time. The name and the time left show under the scoreboard.
+
+| Event | What changes |
+|---|---|
+| Low gravity | Everyone and everything floats |
+| Rain | The floor has no grip: you slide when you turn or stop |
+| UFO | A saucer hunts the ball carrier, beams them up, and drops them somewhere else |
+| Iron ball | The ball floors any opponent it hits in flight, and they cannot catch it |
+| Bomb ball | The ball goes off every 6 seconds, wherever it is |
+| Giant ball | Bigger, easier to grab, and it only fits the rim dead centre |
+
+Knockdowns caused by the court (traffic, a banana, your own bomb) are not credited to either team.
 
 **RIOT meter:** fills from hits, scores, steals and blocks. Each character has two specials:
 
@@ -90,10 +141,12 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 
 | Game | Crew | Court | What the court has |
 |---|---|---|---|
-| 1 | Harbor Hounds (easy) | Pier 9 | No pads; items drop often |
-| 2 | Neon Vipers (normal) | Arcade Alley | Four launch pads |
-| 3 | Sky Pilots (normal) | The Helipad | Launch pads right in the lane, no items |
-| 4 | Iron Monarchs (hard) | Palace Court | Two launch pads, lots of items |
+| 1 | Harbor Hounds (easy) | Pier 9 | Traffic, heavy items (bombs, bats, hammers); rain, iron ball |
+| 2 | Neon Vipers (normal) | Arcade Alley | Four launch pads, bumpers, a skateboard; bomb ball, giant ball, low gravity |
+| 3 | Sky Pilots (normal) | The Helipad | A helicopter, catapults, wind; UFO, low gravity |
+| 4 | Iron Monarchs (hard) | Palace Court | A tank, a wrecking ball, lots of items; UFO, iron ball, bomb ball |
+
+The Rooftop (launch pads, a skateboard, every item; low gravity, rain, giant ball) is only the title-screen court for now.
 
 Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Springs, Heavy Hands. Losing a game lets you retry it.
 
@@ -102,25 +155,27 @@ Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Sp
 ## Architecture
 
 - `src/core/`: a deterministic fixed-step simulation (60 Hz, seeded RNG) with no DOM.
-  - `game.ts`: physics, ball states, shots, dunks, passes, fighting, launch pads, items, scoring, clocks.
+  - `game.ts`: physics, ball states, shots, dunks, passes, fighting, grabs, launch pads, scoring, clocks.
+  - `toys.ts`: items, explosions, hazards, events and rides. Each one works through the same knockdown and ball physics as everything else.
   - `ai.ts`: computer players for both sides.
   - `teams.ts`: teams, courts and upgrades.
 - `src/client/`:
   - `render.ts`: Canvas 2D renderer: camera, zoom and slow motion, particles, HUD.
   - `character.ts`: the characters. Each move produces a target pose (hips, feet, arms, lean, squash) with wind-up and follow-through, and the drawn pose eases toward it. Also faces, outlines and the hit flash.
-  - `sprites.ts`: ball, hoops, pads, items.
+  - `sprites.ts`: ball, hoops, pads.
+  - `toysprites.ts`: items, vehicles, the car, dogs, wrecking ball, bumpers and saucer.
   - `background.ts`: five court themes painted from palettes.
   - `audio.ts`: WebAudio synth for SFX and a music loop.
   - `input.ts`: keyboard layouts for one or two players, and gamepads.
 - `src/main.ts`: menus, modes, player switching, tournament flow.
 - `tests/sim.test.ts`: full computer-vs-computer matches on every court, plus one test per mechanic.
+- `tests/toys.test.ts`: one test per item, hazard, event and ride, plus full matches on all five courts with everything switched on.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
 
 ## Roadmap (proposed)
 
-1. **Tuning from real play:** knockdown rates, launch-pad strength, computer difficulty.
-2. **Breakable backboards:** big dunks shatter the rim for bonus points and a short replacement delay.
-3. **More stage objects:** things to climb, moving hazards, a conveyor that brings items in.
+1. **Tuning from real play:** how often things drop and events fire, knockdown rates (high on the busier courts), grab strength, computer difficulty.
+2. **Engine and rotor sounds, more animation** for the vehicles and the new item moves.
+3. **Court picker** for Quick Match, and a way to switch toys off.
 4. **Online play** using the deterministic core with rollback.
 5. **Sprite sheets:** bake the code-drawn characters into frame-by-frame animation with smear frames.
-6. **Mobile touch controls** and a PWA wrapper.

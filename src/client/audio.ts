@@ -206,6 +206,82 @@ export class Sfx {
         this.noise(0.22, 'bandpass', 1600, 0.6, 1.2);
         this.tone(300, 0.12, 'square', 0.12, 120);
         break;
+      case 'boom':
+        // Explosion: a deep thump under a long burst of noise.
+        this.tone(e.power === 2 ? 70 : 95, e.power === 2 ? 0.6 : 0.35, 'sine', 0.9, 28);
+        this.noise(e.power === 2 ? 0.7 : 0.4, 'lowpass', e.power === 2 ? 900 : 1200, 0.9);
+        this.noise(0.12, 'highpass', 1800, 0.5);
+        break;
+      case 'spray':
+        this.noise(0.09, 'highpass', 3200, 0.12);
+        break;
+      case 'slip':
+        this.tone(900, 0.35, 'sine', 0.2, 180);
+        break;
+      case 'crack':
+        // Bat on ball.
+        this.noise(0.05, 'highpass', 2600, 0.7);
+        this.tone(1100, 0.08, 'square', 0.25, 500);
+        this.tone(240, 0.12, 'triangle', 0.35, 120);
+        this.cheer(0.5);
+        break;
+      case 'rimbreak':
+        this.noise(0.5, 'bandpass', 2400, 0.6, 3);
+        this.tone(520, 0.5, 'square', 0.14, 130);
+        this.tone(780, 0.4, 'triangle', 0.14, 200);
+        break;
+      case 'rimfix':
+        this.tone(660, 0.08, 'triangle', 0.15);
+        this.tone(880, 0.12, 'triangle', 0.15, undefined, 0.08);
+        break;
+      case 'bodydunk':
+        this.noise(0.35, 'lowpass', 400, 0.9);
+        this.tone(70, 0.4, 'sine', 0.6, 40);
+        this.tone(660, 0.4, 'triangle', 0.15);
+        this.cheer(1.6);
+        break;
+      case 'warn':
+        // A horn, twice.
+        this.tone(415, 0.22, 'sawtooth', 0.2);
+        this.tone(523, 0.22, 'sawtooth', 0.14);
+        this.tone(415, 0.3, 'sawtooth', 0.2, undefined, 0.3);
+        this.tone(523, 0.3, 'sawtooth', 0.14, undefined, 0.3);
+        break;
+      case 'bump':
+        this.tone(1320, 0.1, 'square', 0.12, 1760);
+        this.tone(660, 0.07, 'triangle', 0.2);
+        break;
+      case 'gust':
+        this.noise(1.6, 'bandpass', 500, 0.35, 0.5);
+        break;
+      case 'event':
+        this.tone(392, 0.1, 'square', 0.12);
+        this.tone(523, 0.1, 'square', 0.12, undefined, 0.1);
+        this.tone(659, 0.1, 'square', 0.12, undefined, 0.2);
+        this.tone(784, 0.25, 'square', 0.12, undefined, 0.3);
+        break;
+      case 'eventend':
+        this.tone(659, 0.1, 'triangle', 0.1);
+        this.tone(440, 0.16, 'triangle', 0.1, undefined, 0.1);
+        break;
+      case 'beam':
+        this.tone(300, 0.9, 'sine', 0.22, 1500);
+        this.tone(306, 0.9, 'triangle', 0.12, 1530);
+        break;
+      case 'clang':
+        this.tone(1500, 0.18, 'square', 0.1, 900);
+        this.noise(0.08, 'bandpass', 3000, 0.4, 4);
+        break;
+      case 'mount':
+        this.tone(110, 0.25, 'sawtooth', 0.18, 220);
+        this.tone(440, 0.08, 'square', 0.08, undefined, 0.1);
+        break;
+      case 'juggle':
+        this.tone(700, 0.1, 'square', 0.1, 1200);
+        break;
+      case 'boost':
+        this.tone(200, 0.3, 'square', 0.12, 1000);
+        break;
       case 'megaslam':
       case 'blitz':
         this.tone(120, 0.6, 'sawtooth', 0.2, 900);

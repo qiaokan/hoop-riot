@@ -25,6 +25,8 @@ export interface PlayerLook {
   gazeY: number;
   /** Holding a throwable item. */
   carrying: boolean;
+  /** What this player is riding, if anything. */
+  ride?: 'board' | 'tank' | 'heli' | null;
 }
 
 interface Pose {
@@ -189,7 +191,16 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       break;
     case 'punch':
       rate = 55;
-      if (p.combo >= 2) {
+      if (p.weapon === 'bat') {
+        // Two-handed swing: cocked back over the shoulder, then all the way through.
+        if (t < 0.1) {
+          P.armF = 2.9; P.elbowF = 0.9; P.armB = 2.6; P.elbowB = 1.1; P.lean = -0.22; P.hipX = -3; P.fFx = 8; P.fBx = -8; P.hipH = HIP - 3;
+        } else if (t < 0.26) {
+          P.armF = 1.5; P.elbowF = 0; P.armB = 1.3; P.elbowB = 0.2; P.lean = 0.42; P.hipX = 7; P.fFx = 13; P.fBx = -8; P.hipH = HIP - 3; P.head = 0.05;
+        } else {
+          P.armF = 0.6; P.elbowF = 0.4; P.armB = 0.5; P.elbowB = 0.5; P.lean = 0.25; P.fFx = 10;
+        }
+      } else if (p.combo >= 2) {
         // Finisher: sink down and load up, then drive an uppercut through the target.
         if (t < 0.09) {
           P.hipH = HIP - 6; P.lean = 0.3; P.armF = -0.5; P.elbowF = 1.3; P.armB = 0.9; P.elbowB = 1.4; P.fFx = 9; P.fBx = -8; P.head = 0.15;
@@ -311,6 +322,48 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
         P.armF = 3.6; P.elbowF = 0.1; P.armB = 3.5; P.elbowB = 0.1; P.lean = -0.6; P.hipH = HIP - 3; P.hipX = -5; P.fFx = 8; P.fBx = -9; P.head = -0.45;
         if (t > T) { P.lean = -0.3; P.armF = 3.2; P.armB = 3.1; }
       }
+      break;
+    }
+    case 'pound':
+      // Hammer: hauled up overhead with a little hop, then brought down with the whole body.
+      rate = 50;
+      if (t < 0.22) {
+        P.armF = 3.15; P.elbowF = 0.2; P.armB = 3.0; P.elbowB = 0.25; P.lean = -0.28; P.hop = 6; P.head = -0.2; P.fFx = 7; P.fBx = -7;
+      } else {
+        P.armF = 1.05; P.elbowF = 0; P.armB = 0.95; P.elbowB = 0.1; P.lean = 0.6; P.hipH = HIP - 7; P.fFx = 12; P.fBx = -9; P.head = 0.2; P.hipX = 4;
+      }
+      break;
+    case 'spray':
+      // Braced against the kick of the extinguisher.
+      rate = 45;
+      P.armF = 1.5; P.elbowF = 0.1; P.armB = 1.25; P.elbowB = 0.6; P.lean = -0.14; P.hipH = HIP - 2.5; P.fFx = 9; P.fBx = -10;
+      P.hipX = Math.sin(time * 60) * 1.2;
+      break;
+    case 'ride':
+      rate = 30;
+      P.fFy = 0; P.fBy = 0; P.head = 0; P.hop = 0;
+      if (look.ride === 'tank') {
+        // Standing in the hatch.
+        P.hipH = HIP; P.fFx = 4; P.fBx = -4; P.armF = 1.3; P.elbowF = 0.6; P.armB = 0.9; P.elbowB = 0.9; P.lean = 0.1;
+        if (look.hasBall) { P.armF = 1.6; P.elbowF = 0.9; }
+      } else if (look.ride === 'heli') {
+        // Sitting in the tub, hands on the stick.
+        P.hipH = HIP - 9; P.fFx = 14; P.fFy = 6; P.fBx = 10; P.fBy = 5; P.armF = 1.35; P.elbowF = 0.5; P.armB = 1.2; P.elbowB = 0.6;
+        P.lean = -0.06 + clamp01(speed / 230) * 0.2;
+      } else {
+        // Skateboard: low, feet wide, arms out for balance.
+        const lean = clamp01(speed / 340);
+        P.hipH = HIP - 4.5 - 2 * lean; P.fFx = 11; P.fBx = -11; P.lean = 0.12 + 0.3 * lean;
+        P.armF = 1.25; P.elbowF = 0.3; P.armB = -1.0 - 0.3 * lean; P.elbowB = 0.3;
+        if (look.hasBall) { P.armF = 0.9; P.elbowF = 0.9; }
+      }
+      break;
+    case 'beam': {
+      // Hauled up by the saucer: limp, limbs dangling, slowly turning.
+      const f = Math.sin(time * 9 + p.id);
+      P.armF = 2.7 + f * 0.4; P.elbowF = 0.3; P.armB = 2.9 - f * 0.4; P.elbowB = 0.3;
+      P.fFx = 3 + f * 3; P.fFy = 1; P.fBx = -3 - f * 3; P.fBy = 2; P.lean = -0.05; P.head = -0.3;
+      P.rot = Math.sin(time * 4 + p.id) * 0.3; P.rotY = 40;
       break;
     }
     case 'pass':

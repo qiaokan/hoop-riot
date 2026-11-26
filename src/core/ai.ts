@@ -1,5 +1,5 @@
-import { DUNK_RANGE, GRAVITY, HIGH_MIN_Y, HOOP, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
-import { Game, Intent, Player, distXZ } from './game';
+import { COURT, DUNK_RANGE, HIGH_MIN_Y, HOOP, THREE_PT, attackDir, attackHoopX, ownHoopX } from './constants';
+import { Game, Intent, Item, Player, distXZ } from './game';
 import { makeRng } from './rng';
 import type { Difficulty } from './teams';
 
@@ -61,6 +61,13 @@ interface Brain {
   comboGo: boolean;
   /** Walking into the ball carrier to grab them until this time. */
   grabUntil: number;
+  /** Which grab the hoop-throw decision was made for, and what it was. */
+  grabSeen: number;
+  hoopToss: boolean;
+  /** Going to fetch an item or a ride until this time. */
+  fetchUntil: number;
+  fetchX: number;
+  fetchZ: number;
 }
 
 const newBrain = (): Brain => ({
@@ -68,6 +75,7 @@ const newBrain = (): Brain => ({
   tackle: false, ttx: 0, ttz: 0,
   startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
   padUntil: -9, padX: 0, padZ: 0, comboSeen: -1, comboGo: false, grabUntil: -9,
+  grabSeen: -1, hoopToss: false, fetchUntil: -9, fetchX: 0, fetchZ: 0,
 });
 
 export class AIController {
@@ -98,11 +106,16 @@ export class AIController {
 
     // Reflexes that cannot wait for the next decision tick.
     if (g.phase === 'play') {
-      // Holding someone: two knees, then the throw.
+      // On a ride: drive it.
+      if (p.state === 'ride') { this.rideIntent(p, out); return out; }
+      // Holding someone: near the hoop, throw them through it; otherwise two knees, then the throw.
       if (p.state === 'grab') {
+        if (b.grabSeen !== p.grabId) { b.grabSeen = p.grabId; b.hoopToss = this.rng() < 0.3 + P.combo * 0.6; }
+        if (b.hoopToss && distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 300) out.mz = -1;
         out.action = p.t > 0.22 && Math.floor(now * 7) % 2 === 0;
         return out;
       }
+      b.grabSeen = -1;
       // Being held: sometimes burn stamina to wrench free.
       if (p.state === 'held') {
         if (p.stamina >= 0.2 && this.rng() < 0.008 + P.dodge * 0.06) out.special = true;
@@ -127,21 +140,16 @@ export class AIController {
         }
         if (p.vy > 0) {
           b.holding = true;
-          b.shootUntil = now + Math.max(0.03, p.vy / GRAVITY + (this.rng() - 0.5) * 2 * P.jitter);
+          b.shootUntil = now + Math.max(0.03, p.vy / g.grav + (this.rng() - 0.5) * 2 * P.jitter);
           out.shoot = true;
         }
         return out;
       }
-      // Carrying an item with an opponent lined up: throw it.
-      if (!has && p.state === 'move' && g.heldItem(p)) {
-        for (const o of g.opponents(p)) {
-          const dx = o.x - p.x;
-          if (g.canAct(o) && Math.abs(o.z - p.z) < 18 && Math.abs(dx) > 40 && Math.abs(dx) < 400 && this.rng() < 0.15) {
-            out.action = true;
-            out.face = dx > 0 ? 1 : -1;
-            return out;
-          }
-        }
+      // Carrying an item: use it when it would connect.
+      const carried = !has && p.state === 'move' ? g.heldItem(p) : null;
+      if (carried) {
+        const face = this.itemUse(p, carried);
+        if (face) { out.action = true; out.face = face; return out; }
       }
       // Teammate is in the air at the rim: throw the lob.
       const mate = g.teammate(p);
@@ -207,7 +215,163 @@ export class AIController {
     out.sprint = b.sprint;
     out.grab = now < b.grabUntil;
     if (out.grab) out.sprint = false;
+    if (g.phase === 'play') this.avoid(p, out, P);
     return out;
+  }
+
+  /** Which way to face to use the carried item right now (0 = not yet). */
+  private itemUse(p: Player, it: Item): 1 | -1 | 0 {
+    const g = this.game;
+    const ball = g.ball;
+    const side = (dx: number): 1 | -1 => (dx >= 0 ? 1 : -1);
+    const opps = g.opponents(p).filter((o) => g.hittable(o));
+    switch (it.kind) {
+      case 'bat': {
+        // A loose ball in reach: bat it at the hoop. Otherwise swing at whoever is in reach.
+        const bx = ball.x - p.x;
+        if (ball.state === 'loose' && ball.y < 80 && Math.abs(ball.z - p.z) < 26 && Math.abs(bx) < 66 && Math.abs(bx) > 8) return side(bx);
+        for (const o of opps) {
+          const dx = o.x - p.x;
+          if (Math.abs(dx) < 66 && Math.abs(o.z - p.z) < 24 && Math.abs(o.y - p.y) < 50) return side(dx);
+        }
+        return 0;
+      }
+      case 'hammer':
+        for (const o of opps) if (o.y < 40 && distXZ(p.x, p.z, o.x, o.z) < 105) return p.facing;
+        return 0;
+      case 'ext':
+        for (const o of opps) {
+          const dx = o.x - p.x;
+          if (Math.abs(dx) > 30 && Math.abs(dx) < 170 && Math.abs(o.z - p.z) < 34) return side(dx);
+        }
+        return 0;
+      case 'bomb': {
+        let near = 0, best = Infinity;
+        for (const o of opps) {
+          const dx = o.x - p.x;
+          if (Math.abs(dx) < best) { best = Math.abs(dx); near = dx; }
+          if (Math.abs(o.z - p.z) < 34 && Math.abs(dx) > 170 && Math.abs(dx) < 420 && this.rng() < 0.25) return side(dx);
+        }
+        // About to go off: get rid of it.
+        if (it.fuse >= 0 && it.fuse < 1.2) return side(near || p.facing);
+        return 0;
+      }
+      case 'banana':
+        for (const o of opps) {
+          const dx = o.x - p.x;
+          if (Math.abs(o.z - p.z) < 30 && Math.abs(dx) > 110 && Math.abs(dx) < 330 && this.rng() < 0.15) return side(dx);
+        }
+        return 0;
+      default:
+        for (const o of opps) {
+          const dx = o.x - p.x;
+          if (g.canAct(o) && Math.abs(o.z - p.z) < 18 && Math.abs(dx) > 40 && Math.abs(dx) < 400 && this.rng() < 0.15) return side(dx);
+        }
+        return 0;
+    }
+  }
+
+  /** Steers out of the way of traffic, the wrecking ball and bombs about to go off. */
+  private avoid(p: Player, out: Intent, P: AIParams) {
+    const g = this.game, T = g.toys;
+    if (p.state !== 'move' || p.y > 0) return;
+    for (const it of g.items) {
+      if (it.kind !== 'bomb' || it.fuse < 0 || it.fuse > 1.6 || it.holder === p.id) continue;
+      const dx = p.x - it.x, dz = p.z - it.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 125) { out.mx = d > 1 ? dx / d : p.facing; out.mz = d > 1 ? dz / d : 0; out.sprint = true; return; }
+    }
+    let away = 0;
+    const t = T.traffic;
+    if (t && Math.abs(p.z - t.lane) < 44 && (p.x - t.x) * t.dir > -70 && t.warn < 1.5 - P.react * 2.5) away = p.z >= t.lane ? 1 : -1;
+    const w = T.wrecker;
+    if (w && Math.abs(p.z - w.z) < 48 && Math.abs(p.x - w.x) < 210 && Math.abs(p.x - COURT.midX) < 250) {
+      if ((p.x - w.x) * w.vx > 0 || Math.abs(p.x - w.x) < 70) away = p.z >= w.z ? 1 : -1;
+    }
+    if (away) {
+      // Near a side line, go the other way rather than into the fence.
+      if (p.z + away * 50 < COURT.minZ || p.z + away * 50 > COURT.maxZ) away = -away;
+      out.mz = away;
+    }
+  }
+
+  /** Driving a ride: carry the ball to the hoop with it, or go after the other side. */
+  private rideIntent(p: Player, out: Intent) {
+    const g = this.game;
+    const r = g.toys.rideOf(p);
+    if (!r) return;
+    const has = g.ball.holder === p.id;
+    const hx = attackHoopX(p.team), dir = attackDir(p.team);
+    const go = (x: number, z: number, stop = 8) => {
+      const dx = x - p.x, dz = z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > stop) { out.mx = dx / d; out.mz = dz / d; }
+      return d;
+    };
+    const pulse = Math.floor(g.time * 6) % 2 === 0;
+    const dHoop = distXZ(p.x, p.z, hx, HOOP.z);
+    if (has) {
+      if (r.kind === 'heli') {
+        go(hx - dir * 60, HOOP.z);
+        if (dHoop < 170 && p.y > HIGH_MIN_Y) out.shoot = true; // bail out into a sky dunk
+      } else if (r.kind === 'tank') {
+        if (dHoop < 460) { out.mx = dir * 0.2; if (r.facing === dir) out.action = pulse; } // fire the ball
+        else go(hx - dir * 380, HOOP.z);
+      } else {
+        go(hx - dir * 100, HOOP.z);
+        if (dHoop < 205 && r.facing === Math.sign(hx - p.x)) out.shoot = true;
+      }
+      return;
+    }
+    const holder = g.holder();
+    const ball = g.ball;
+    if (!holder) {
+      // Nobody has the ball: go to it. It cannot be reached from the air, so jump out near it.
+      const d = go(ball.x, ball.z, 4);
+      if (r.kind === 'heli' && ball.state === 'loose' && d < 150) out.shoot = true;
+      return;
+    }
+    const target = holder.team !== p.team ? holder : this.nearestOpp(p).o;
+    if (!target) return;
+    if (r.kind === 'heli') {
+      const d = go(target.x + target.vx * 0.5, target.z + target.vz * 0.5, 6);
+      if (d < 34 && target.y < 40) out.action = pulse; // bombs away
+    } else if (r.kind === 'tank') {
+      const dx = target.x - p.x, dz = target.z - p.z;
+      if (Math.abs(dz) > 14) out.mz = Math.sign(dz);
+      out.mx = Math.sign(dx) * (Math.abs(dx) > 420 ? 1 : 0.2);
+      if (Math.abs(dz) < 22 && Math.abs(dx) < 520 && Math.abs(dx) > 50 && r.facing === Math.sign(dx)) out.action = pulse;
+    } else go(target.x, target.z, 0); // skateboard: run them over
+  }
+
+  /** Something worth a detour: a free ride, or an item lying nearby. */
+  private fetch(p: Player, holder: Player | null): { x: number; z: number } | null {
+    const g = this.game;
+    const has = holder?.id === p.id;
+    const mate = g.teammate(p);
+    const ball = g.ball;
+    // Whoever is closest to the action stays on it.
+    const ours = !!holder && holder.team === p.team;
+    const fx = holder ? holder.x : ball.x, fz = holder ? holder.z : ball.z;
+    const busy = !has && !ours && distXZ(p.x, p.z, fx, fz) <= (g.canAct(mate) ? distXZ(mate.x, mate.z, fx, fz) : Infinity);
+    if (busy) return null;
+    if (has && this.nearestOpp(p).d < 70) return null;
+    let best: { x: number; z: number } | null = null, bd = Infinity;
+    if (p.rideCd <= 0) {
+      for (const r of g.toys.rides) {
+        if (r.rider !== null || r.respawn > 0 || r.y > 0) continue;
+        const d = distXZ(p.x, p.z, r.x, r.z);
+        if (d < 230 && d < bd) { bd = d; best = r; }
+      }
+    }
+    for (const it of g.items) {
+      if (it.state !== 'ground' || it.armed || it.y > 0) continue;
+      const worn = it.kind === 'magnet' || it.kind === 'shoes';
+      if (!worn && (has || g.heldItem(p))) continue;
+      const d = distXZ(p.x, p.z, it.x, it.z);
+      if (d < (has ? 90 : 170) && d < bd) { bd = d; best = it; }
+    }
+    return best;
   }
 
   private think(p: Player, b: Brain) {
@@ -217,6 +381,14 @@ export class AIController {
     if (!g.canAct(p) || g.phase !== 'play') { b.tx = p.x; b.tz = p.z; return; }
     const ball = g.ball;
     const holder = g.holder();
+    // A detour for a ride or an item, when not needed elsewhere.
+    if (p.state === 'move') {
+      if (g.time >= b.fetchUntil && this.rng() < 0.18) {
+        const f = this.fetch(p, holder);
+        if (f) { b.fetchUntil = g.time + 0.7; b.fetchX = f.x; b.fetchZ = f.z; }
+      }
+      if (g.time < b.fetchUntil) { b.tx = b.fetchX; b.tz = b.fetchZ; b.sprint = p.stamina > 0.3; return; }
+    }
     if (holder && holder.id === p.id) this.withBall(p, b);
     else if (ball.state === 'held' && holder && holder.team === p.team) this.offBall(p, b, holder);
     else if (ball.state === 'held' && holder) this.defend(p, b, holder);
@@ -271,6 +443,14 @@ export class AIController {
           return;
         }
       }
+    }
+
+    // The rim we attack is broken: nothing counts there, so keep the ball safe until it is fixed.
+    if (g.shotClock > 3 && g.rims.some((r) => r.x === hx && !r.high && r.brokenT > 0.6)) {
+      b.tx = hx - dir * 300;
+      b.tz = opp ? (opp.z > HOOP.z ? 70 : 290) : p.z;
+      b.sprint = nd < 110 && p.stamina > 0.2;
+      return;
     }
 
     // Teammate (possibly the human) asked for the ball.

@@ -21,7 +21,7 @@ export function drawShadow(ctx: CanvasRenderingContext2D, x: number, z: number, 
 
 // ---------------------------------------------------------------- ball, hoops, stage
 
-export function drawBall(ctx: CanvasRenderingContext2D, sx: number, syy: number, spin: number, glow = false) {
+export function drawBall(ctx: CanvasRenderingContext2D, sx: number, syy: number, spin: number, glow = false, r = 9, skin: 'normal' | 'iron' | 'bomb' = 'normal', pulse = 0) {
   if (glow) {
     const g = ctx.createRadialGradient(sx, syy, 2, sx, syy, 26);
     g.addColorStop(0, 'rgba(255,240,150,0.9)');
@@ -29,13 +29,20 @@ export function drawBall(ctx: CanvasRenderingContext2D, sx: number, syy: number,
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(sx, syy, 26, 0, Math.PI * 2); ctx.fill();
   }
-  const r = 9;
-  const g = ctx.createRadialGradient(sx - 3, syy - 3, 1, sx, syy, r);
-  g.addColorStop(0, '#ffb15c');
-  g.addColorStop(1, '#d4581a');
+  const g = ctx.createRadialGradient(sx - r / 3, syy - r / 3, 1, sx, syy, r);
+  if (skin === 'iron') { g.addColorStop(0, '#c4cad8'); g.addColorStop(1, '#3a3f4c'); }
+  else if (skin === 'bomb') { g.addColorStop(0, pulse > 0.5 ? '#ff8a6a' : '#5a5a68'); g.addColorStop(1, pulse > 0.5 ? '#c2281c' : '#17171d'); }
+  else { g.addColorStop(0, '#ffb15c'); g.addColorStop(1, '#d4581a'); }
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(sx, syy, r, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = 'rgba(40,16,6,0.8)';
+  if (skin === 'bomb') {
+    // A lit fuse on top.
+    ctx.strokeStyle = '#c9a25a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sx, syy - r); ctx.quadraticCurveTo(sx + 5, syy - r - 6, sx + 8, syy - r - 3); ctx.stroke();
+    ctx.fillStyle = '#ffe14a';
+    ctx.beginPath(); ctx.arc(sx + 8, syy - r - 3, 2 + 2 * pulse, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.strokeStyle = skin === 'normal' ? 'rgba(40,16,6,0.8)' : 'rgba(10,10,16,0.7)';
   ctx.lineWidth = 1.1;
   ctx.save();
   ctx.translate(sx, syy);
@@ -65,7 +72,7 @@ function drawBoard(ctx: CanvasRenderingContext2D, boardX: number, dir: number, r
 }
 
 /** Stanchion, both backboards and the back halves of both rims. The upper (gold) hoop is the bonus hoop. */
-export function drawHoopBack(ctx: CanvasRenderingContext2D, hx: number, camX: number) {
+export function drawHoopBack(ctx: CanvasRenderingContext2D, hx: number, camX: number, brokenLow = false, brokenHigh = false) {
   const dir = hx < 750 ? 1 : -1;
   const x = hx - camX;
   const poleX = x - dir * 70;
@@ -87,6 +94,7 @@ export function drawHoopBack(ctx: CanvasRenderingContext2D, hx: number, camX: nu
   drawBoard(ctx, boardX, dir, HIGH_RIM_Y, true);
   drawBoard(ctx, boardX, dir, HOOP.rimY, false);
   for (const [rimY, col] of [[HIGH_RIM_Y, '#d9a520'], [HOOP.rimY, '#e8541c']] as const) {
+    if (rimY === HOOP.rimY ? brokenLow : brokenHigh) continue;
     ctx.strokeStyle = col;
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -96,11 +104,25 @@ export function drawHoopBack(ctx: CanvasRenderingContext2D, hx: number, camX: nu
 }
 
 /** Net and the front half of one rim (drawn over players and the ball). */
-export function drawHoopFront(ctx: CanvasRenderingContext2D, hx: number, camX: number, rimY: number, sway: number, time: number) {
+export function drawHoopFront(ctx: CanvasRenderingContext2D, hx: number, camX: number, rimY: number, sway: number, time: number, broken = false) {
   const x = hx - camX;
   const ry = sy(HOOP.z, rimY);
   const r = HOOP.rimR;
   const gold = rimY > HOOP.rimY;
+  if (broken) {
+    // Torn off its bracket: the rim dangles against the board, swinging a little.
+    const dir = hx < 750 ? 1 : -1;
+    ctx.save();
+    ctx.translate(x - dir * 20, ry);
+    ctx.rotate(dir * (1.25 + Math.sin(time * 5) * 0.08));
+    ctx.strokeStyle = gold ? '#b8891f' : '#b5471c';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(dir * 19, 0, r, r * ZS * 0.5, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(245,245,245,0.6)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(dir * (8 + i * 7), 3); ctx.lineTo(dir * (10 + i * 6), 16); ctx.stroke(); }
+    ctx.restore();
+    return;
+  }
   ctx.strokeStyle = gold ? 'rgba(255,240,190,0.9)' : 'rgba(245,245,245,0.85)';
   ctx.lineWidth = 1;
   const wob = Math.sin(time * 30) * sway * 4;
@@ -155,33 +177,4 @@ export function drawPad(ctx: CanvasRenderingContext2D, x: number, y: number, cha
     ctx.lineWidth = 3;
     ctx.beginPath(); ctx.ellipse(x, y, rx - 5, ry - 3, 0, -Math.PI / 2, -Math.PI / 2 + charge * Math.PI * 2); ctx.stroke();
   }
-}
-
-/** Throwable items: 0 trash can, 1 traffic cone, 2 crate. */
-export function drawItem(ctx: CanvasRenderingContext2D, kind: number, x: number, y: number, spin: number) {
-  ctx.save();
-  ctx.translate(x, y - 9);
-  ctx.rotate(spin);
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = '#1a1a22';
-  if (kind === 0) {
-    ctx.fillStyle = '#aab3c0';
-    roundRect(ctx, -7, -9, 14, 18, 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#7d8794';
-    ctx.fillRect(-8.5, -11, 17, 4);
-    ctx.beginPath(); ctx.moveTo(-3, -6); ctx.lineTo(-3, 8); ctx.moveTo(3, -6); ctx.lineTo(3, 8); ctx.stroke();
-  } else if (kind === 1) {
-    ctx.fillStyle = '#ff7a1a';
-    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 7); ctx.lineTo(-7, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(-3.6, -3, 7.2, 3);
-    ctx.fillStyle = '#ff7a1a';
-    ctx.fillRect(-9, 7, 18, 3);
-    ctx.strokeRect(-9, 7, 18, 3);
-  } else {
-    ctx.fillStyle = '#b5814a';
-    ctx.fillRect(-9, -9, 18, 18); ctx.strokeRect(-9, -9, 18, 18);
-    ctx.beginPath(); ctx.moveTo(-9, -9); ctx.lineTo(9, 9); ctx.moveTo(9, -9); ctx.lineTo(-9, 9); ctx.stroke();
-  }
-  ctx.restore();
 }

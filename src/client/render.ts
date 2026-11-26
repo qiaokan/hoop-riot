@@ -1,9 +1,11 @@
-import { COURT, GRAVITY, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/constants';
-import type { Game, GameEvent, Player } from '../core/game';
+import { BALL_R, COURT, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/constants';
+import type { Game, GameEvent, Item, Player } from '../core/game';
 import type { CourtId } from '../core/teams';
+import { EVENT_NAME, RIDE } from '../core/toys';
 import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './background';
 import { Mood, drawPlayer, handPos } from './character';
-import { drawBall, drawHoopBack, drawHoopFront, drawItem, drawPad, drawShadow, roundRect } from './sprites';
+import { drawBall, drawHoopBack, drawHoopFront, drawPad, drawShadow, roundRect } from './sprites';
+import { drawBat, drawBumper, drawCar, drawDog, drawHammer, drawItem, drawRideBack, drawRideFront, drawShell, drawUfo, drawWrecker } from './toysprites';
 import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, sy } from './view';
 
 interface Particle {
@@ -19,7 +21,7 @@ interface Popup { text: string; x: number; y: number; z: number; life: number; c
 interface Banner { text: string; sub?: string; life: number; max: number; color: string }
 
 /** A player a person is controlling, and the tag drawn over their head. */
-export interface HumanView { pid: number; label: string; color: string; /** Key names to show in prompts. */ action: string; dodge: string }
+export interface HumanView { pid: number; label: string; color: string; /** Key names to show in prompts. */ action: string; dodge: string; shoot: string }
 
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
@@ -205,7 +207,95 @@ export class Renderer {
         this.popup('BOING!', { ...e, y: 40 }, '#ffd23f', 17);
         break;
       case 'item':
-        this.popup('GOT IT!', e, '#ffffff', 13);
+        this.popup(e.text ?? 'GOT IT!', e, e.text === 'BOMB!' ? '#ff5a5a' : '#ffffff', e.text ? 15 : 13);
+        break;
+      case 'boom': {
+        // Explosion: fireball, smoke, shockwave rings.
+        const big = (e.power ?? 1) >= 2;
+        this.burst(e, big ? 22 : 12, '#fff3a0', 'fire', big ? 300 : 200);
+        this.burst(e, big ? 20 : 10, '#ff8a2a', 'fire', big ? 220 : 150);
+        this.burst(e, big ? 14 : 8, 'rgba(70,70,82,0.85)', 'dust', big ? 190 : 130);
+        this.burst(e, big ? 16 : 8, '#ffe14a', 'spark', big ? 460 : 320);
+        this.ring({ ...e, y: 6 }, '#ffffff');
+        if (big) this.ring({ ...e, y: 6 }, '#ff8a2a');
+        this.impact(e, '#ffe14a', big ? 78 : 50);
+        this.shake = Math.max(this.shake, big ? 18 : 10);
+        this.flash = Math.max(this.flash, big ? 0.4 : 0.2);
+        this.popup(e.text ?? 'BOOM!', { ...e, y: e.y + 30 }, '#ff8a2a', big ? 26 : 20);
+        break;
+      }
+      case 'spray':
+        for (let i = 0; i < 4; i++) {
+          this.particles.push({
+            x: e.x, y: e.y + (this.rnd() - 0.5) * 8, z: e.z + (this.rnd() - 0.5) * 10,
+            vx: (e.power ?? 1) * (260 + this.rnd() * 220), vy: (this.rnd() - 0.4) * 60, vz: (this.rnd() - 0.5) * 50,
+            life: 0, max: 0.5, color: 'rgba(240,248,255,0.85)', size: 7, kind: 'dust', grav: -30,
+          });
+        }
+        break;
+      case 'slip':
+        this.burst({ ...e, y: 4 }, 8, '#ffe14a', 'spark', 180);
+        this.popup('SLIP!', e, '#ffe14a', 20);
+        break;
+      case 'crack':
+        this.impact(e, '#ffffff', 44);
+        this.burst(e, 14, '#fff6a8', 'spark', 340);
+        this.popup(e.text ?? 'CRACK!', { ...e, y: e.y + 30 }, '#7dff6a', 22);
+        this.shake = Math.max(this.shake, 8);
+        this.drama(e, 0.35, 0.2);
+        break;
+      case 'rimbreak':
+        this.burst(e, 24, '#ffb15c', 'spark', 360);
+        this.burst(e, 10, 'rgba(235,240,250,0.9)', 'confetti', 200);
+        this.showBanner('RIM BROKEN!', '#ff5a5a', 'NO BASKETS THERE FOR 6 SECONDS');
+        this.shake = Math.max(this.shake, 12);
+        break;
+      case 'rimfix':
+        this.popup('RIM FIXED', e, '#7dff6a', 16);
+        this.ring(e, '#7dff6a');
+        break;
+      case 'bodydunk':
+        this.netSway[net(high)] = 1.6;
+        this.burst(e, 26, '#ffffff', 'spark', 360);
+        this.ring(e, '#ff4fa3');
+        this.shake = Math.max(this.shake, 14);
+        this.flash = 0.35;
+        this.showBanner('BODY DUNK!', '#ff4fa3', '+1 POINT');
+        this.drama(e, 0.9, 0.5);
+        break;
+      case 'warn':
+        this.showBanner(e.text ?? 'LOOK OUT!', '#ff5a5a', 'GET OUT OF THE LANE', 1.3);
+        break;
+      case 'bump':
+        this.ring({ ...e, y: 8 }, '#ff4fa3');
+        this.burst({ ...e, y: 14 }, 6, '#ffe14a', 'spark', 220);
+        break;
+      case 'gust':
+        this.popup(e.text ?? 'WIND!', e, '#bfe9ff', 26);
+        break;
+      case 'event':
+        this.showBanner(e.text ?? 'EVENT', '#3ff0ff', undefined, 1.6);
+        this.flash = Math.max(this.flash, 0.2);
+        break;
+      case 'beam':
+        this.ring({ ...e, y: 4 }, '#96ffbe');
+        this.popup(e.text ?? 'ABDUCTED!', { ...e, y: e.y + 60 }, '#96ffbe', 20);
+        break;
+      case 'clang':
+        this.burst(e, 8, '#c4cad8', 'spark', 260);
+        this.popup('CLANG!', { ...e, y: e.y + 30 }, '#c4cad8', 16);
+        this.shake = Math.max(this.shake, 4);
+        break;
+      case 'mount':
+        this.ring({ ...e, y: 4 }, '#ffe14a');
+        this.popup(e.text ?? 'RIDE!', { ...e, y: e.y + 40 }, '#ffe14a', 20);
+        break;
+      case 'juggle':
+        this.popup(e.text ?? 'JUGGLE!', e, '#ff4fa3', 22);
+        break;
+      case 'boost':
+        this.ring({ ...e, y: 4 }, '#7dff6a');
+        this.popup('BOOST!', { ...e, y: 50 }, '#7dff6a', 20);
         break;
       case 'throw':
         this.burst(e, 4, 'rgba(220,220,230,0.8)', 'dust', 80);
@@ -246,7 +336,8 @@ export class Renderer {
         this.showBanner('SHOCKWAVE!', '#9ef0ff');
         break;
       case 'violation':
-        this.showBanner('SHOT CLOCK', '#ff5a5a', 'TURNOVER');
+        if (e.text === 'NO RIM!') this.popup('NO RIM!', e, '#ff5a5a', 22);
+        else this.showBanner('SHOT CLOCK', '#ff5a5a', 'TURNOVER');
         break;
       case 'suddendeath':
         this.showBanner('SUDDEN DEATH', '#ff5a5a', 'NEXT BUCKET WINS', 2.2);
@@ -306,8 +397,9 @@ export class Renderer {
     switch (p.state) {
       case 'down': return { mood: 'dizzy', celebrate: false };
       case 'stun': return { mood: 'pain', celebrate: false };
-      case 'punch': case 'tackle': case 'airkick': case 'grab': case 'toss': return { mood: 'angry', celebrate: false };
-      case 'held': return { mood: 'pain', celebrate: false };
+      case 'punch': case 'tackle': case 'airkick': case 'grab': case 'toss': case 'pound': case 'spray': return { mood: 'angry', celebrate: false };
+      case 'held': case 'beam': return { mood: 'pain', celebrate: false };
+      case 'ride': return { mood: Math.hypot(p.vx, p.vz) > 150 ? 'effort' : 'happy', celebrate: false };
       case 'dunk': case 'hang': return { mood: 'happy', celebrate: false };
       case 'shoot': case 'spin': return { mood: 'focus', celebrate: false };
       default: break;
@@ -354,14 +446,37 @@ export class Renderer {
       drawPad(ctx, pad.x - camX, sy(pad.z), 1 - game.padTimers[i] / PAD_RECHARGE, game.time);
     });
 
-    drawHoopBack(ctx, HOOP.leftX, camX);
-    drawHoopBack(ctx, HOOP.rightX, camX);
+    const toys = game.toys;
+    const time = game.time;
+    const broken = (hx: number, highRim: boolean) => game.rims.some((r) => r.x === hx && r.high === highRim && r.brokenT > 0);
+
+    // Traffic lane: a flashing warning stripe before and while something comes through.
+    const tr = toys.traffic;
+    if (tr) {
+      const ly = sy(tr.lane);
+      const a = tr.warn > 0 ? 0.2 + 0.2 * Math.abs(Math.sin(time * 12)) : 0.14;
+      ctx.fillStyle = `rgba(255,60,50,${a})`;
+      ctx.fillRect(0, ly - 19, VIEW_W, 38);
+      ctx.fillStyle = `rgba(255,225,74,${a + 0.3})`;
+      const off = (time * 220 * tr.dir) % 60;
+      for (let x = -60 + off; x < VIEW_W + 60; x += 60) {
+        ctx.beginPath();
+        ctx.moveTo(x + tr.dir * 10, ly); ctx.lineTo(x - tr.dir * 6, ly - 10); ctx.lineTo(x - tr.dir * 1, ly); ctx.lineTo(x - tr.dir * 6, ly + 10);
+        ctx.fill();
+      }
+    }
+
+    drawHoopBack(ctx, HOOP.leftX, camX, broken(HOOP.leftX, false), broken(HOOP.leftX, true));
+    drawHoopBack(ctx, HOOP.rightX, camX, broken(HOOP.rightX, false), broken(HOOP.rightX, true));
 
     // Shadows.
-    for (const p of game.players) drawShadow(ctx, p.x - camX, p.z, p.y, 24 * p.def.build);
+    for (const p of game.players) if (p.state !== 'ride') drawShadow(ctx, p.x - camX, p.z, p.y, 24 * p.def.build);
     const b = game.ball;
-    drawShadow(ctx, b.x - camX, b.z, b.y, 10);
+    drawShadow(ctx, b.x - camX, b.z, b.y, 10 * (game.ballR / BALL_R));
     for (const it of game.items) if (it.state !== 'held') drawShadow(ctx, it.x - camX, it.z, it.y, 10);
+    for (const r of toys.rides) if (r.respawn <= 0) drawShadow(ctx, r.x - camX, r.z, r.y, r.kind === 'board' ? 24 : 46);
+    if (toys.wrecker) drawShadow(ctx, toys.wrecker.x - camX, toys.wrecker.z, toys.wrecker.y, 30);
+    if (toys.ufo) drawShadow(ctx, toys.ufo.x - camX, toys.ufo.z, 215, 60);
 
     // Depth-sorted entities.
     const labels = new Map(humans.map((h) => [h.pid, h]));
@@ -374,9 +489,33 @@ export class Renderer {
         draw: () => drawPlayer(ctx, p, game.teams[p.team], p.x - camX, game.time, {
           ...look, hasBall: b.holder === p.id, label: h?.label, labelColor: h?.color,
           dt, ballH: b.y - p.y, gazeX: b.x - p.x, gazeY: b.y - (p.y + 70), carrying: !!game.heldItem(p),
+          ride: toys.rideOf(p)?.kind ?? null,
         }),
       });
     }
+    // Rides: one part behind the rider, one part in front.
+    for (const r of toys.rides) {
+      if (r.respawn > 0) continue;
+      const rider = r.rider !== null ? game.players[r.rider] : null;
+      const rx = r.x - camX, ry = sy(r.z, r.y);
+      const col = rider ? game.teams[rider.team].jersey : null;
+      const anim = rider ? rider.anim : r.x;
+      items.push({ z: r.z - 0.5, draw: () => drawRideBack(ctx, r.kind, rx, ry, r.facing, time, !!rider, anim) });
+      items.push({ z: r.z + 0.5, draw: () => drawRideFront(ctx, r.kind, rx, ry, r.facing, time, !!rider, anim, col) });
+    }
+    if (tr && tr.warn <= 0) {
+      if (tr.kind === 'car') items.push({ z: tr.lane + 4, draw: () => drawCar(ctx, tr.x - camX, sy(tr.lane) + 6, tr.dir, time) });
+      else for (let i = 0; i < 4; i++) {
+        const dz = i % 2 ? 7 : -7;
+        items.push({ z: tr.lane + dz, draw: () => drawDog(ctx, tr.x - tr.dir * i * 60 - camX, sy(tr.lane + dz), tr.dir, time, i) });
+      }
+    }
+    const wk = toys.wrecker;
+    if (wk) items.push({ z: wk.z + 1, draw: () => drawWrecker(ctx, wk.x - camX, sy(wk.z, wk.y), COURT.midX - camX, sy(wk.z, 430)) });
+    for (const bm of toys.bumpers) items.push({ z: bm.z, draw: () => drawBumper(ctx, bm.x - camX, sy(bm.z), bm.hit / 0.25, time) });
+    for (const sh of toys.shells) items.push({ z: sh.z, draw: () => drawShell(ctx, sh.x - camX, sy(sh.z, sh.y), Math.sign(sh.vx)) });
+    const ufo = toys.ufo;
+    if (ufo) items.push({ z: ufo.z + 3, draw: () => drawUfo(ctx, ufo.x - camX, sy(ufo.z, 215), sy(ufo.z), time, ufo.phase === 'lift' ? 1 : ufo.phase === 'carry' ? 0.5 : ufo.cd <= 0 ? 0.2 : 0) });
     items.push({
       z: b.z + 1,
       draw: () => {
@@ -405,18 +544,44 @@ export class Renderer {
             bx = hx + h.facing * 5; by = hy + 4;
           }
         }
-        drawBall(ctx, bx, by, b.spin, !!b.shot?.special);
+        const ev = toys.event?.kind;
+        const pulse = ev === 'bombball' ? (Math.sin(time * (toys.ballFuse < 1.5 ? 38 : 12)) > 0 ? 1 : 0) : 0;
+        drawBall(ctx, bx, by, b.spin, !!b.shot?.special, game.ballR, ev === 'ironball' ? 'iron' : ev === 'bombball' ? 'bomb' : 'normal', pulse);
+        if (ev === 'bombball') {
+          // Fuse timer around the ball.
+          ctx.strokeStyle = toys.ballFuse < 1.5 ? '#ff5a5a' : '#ffe14a';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(bx, by, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, toys.ballFuse / 6)); ctx.stroke();
+        }
       },
     });
     for (const it of game.items) {
-      items.push({ z: it.z + 2, draw: () => drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.state === 'thrown' ? it.spin : 0) });
+      items.push({ z: it.z + 2, draw: () => this.drawItemAt(game, it, camX) });
     }
     items.sort((a, c) => a.z - c.z);
     for (const it of items) it.draw();
 
     for (const [hx, side] of [[HOOP.leftX, 0], [HOOP.rightX, 2]] as const) {
-      drawHoopFront(ctx, hx, camX, HIGH_RIM_Y, this.netSway[side + 1], game.time);
-      drawHoopFront(ctx, hx, camX, HOOP.rimY, this.netSway[side], game.time);
+      drawHoopFront(ctx, hx, camX, HIGH_RIM_Y, this.netSway[side + 1], game.time, broken(hx, true));
+      drawHoopFront(ctx, hx, camX, HOOP.rimY, this.netSway[side], game.time, broken(hx, false));
+    }
+
+    // Worn power-ups show over the head; a ridden vehicle shows how much longer it lasts.
+    for (const p of game.players) {
+      if (p.state === 'down') continue;
+      const px = p.x - camX, py = sy(p.z, p.y) - 118;
+      let ix = px + 18;
+      if (p.magnetT > 0 && (p.magnetT > 2 || Math.floor(time * 8) % 2)) { drawItem(ctx, 'magnet', ix, py, 0); ix += 20; }
+      if (p.springT > 0 && (p.springT > 2 || Math.floor(time * 8) % 2)) drawItem(ctx, 'shoes', ix, py, 0);
+      const r = toys.rideOf(p);
+      if (r && p.state === 'ride') {
+        const k = Math.max(0, r.fuel / RIDE[r.kind].fuel);
+        ctx.fillStyle = 'rgba(12,8,28,0.85)';
+        ctx.fillRect(px - 22, py - 28, 44, 6);
+        ctx.fillStyle = k > 0.3 ? '#ffe14a' : '#ff5a5a';
+        ctx.fillRect(px - 21, py - 27, 42 * k, 4);
+        if (r.kind === 'tank') for (let i = 0; i < r.hp; i++) { ctx.fillStyle = '#7dff6a'; ctx.fillRect(px - 21 + i * 11, py - 20, 9, 3); }
+      }
     }
 
     // Release-timing bar for each person's jump shot. The marker sweeps left to right over the
@@ -426,7 +591,7 @@ export class Renderer {
       if (h.state !== 'shoot' || h.released || b.holder !== h.id) continue;
       const tA = game.apexTime(h);
       const W = game.shotWindow(h);
-      const off = Math.abs(h.vy) / GRAVITY;
+      const off = Math.abs(h.vy) / game.grav;
       const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
       const bw = 70, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 166;
       const zone = Math.max(2, (W / tA) * bw);
@@ -447,7 +612,7 @@ export class Renderer {
       if (h.state !== 'grab' && h.state !== 'held') continue;
       const x = h.x - camX + (h.state === 'grab' ? h.facing * 12 : 0), y = sy(h.z, 0) - 172;
       const lines = h.state === 'grab'
-        ? [h.knees < 2 ? `${hv.action}: knee (${h.knees}/2)` : `${hv.action}: THROW!`, `LEFT / RIGHT + ${hv.action}: THROW`]
+        ? [h.knees < 2 ? `${hv.action}: knee (${h.knees}/2)` : `${hv.action}: THROW!`, `LEFT / RIGHT + ${hv.action}: THROW`, `UP + ${hv.action}: AT THE HOOP`]
         : [`${hv.dodge}: break free`];
       ctx.textAlign = 'center';
       ctx.font = 'bold 13px "Trebuchet MS", sans-serif';
@@ -464,9 +629,38 @@ export class Renderer {
       }
     }
 
+    // What the buttons do right now for a person carrying an item or riding something.
+    for (const hv of humans) {
+      const h = game.players[hv.pid];
+      const it = game.heldItem(h);
+      const r = h.state === 'ride' ? toys.rideOf(h) : null;
+      let line = '';
+      if (r) {
+        const has = b.holder === h.id;
+        line = r.kind === 'tank' ? `${hv.action}: ${has ? 'FIRE THE BALL' : 'FIRE'} · ${hv.shoot}: ${has ? 'shoot' : 'get out'}`
+          : r.kind === 'heli' ? `${hv.action}: BOMB · ${hv.shoot}: ${has ? 'SKY DUNK' : 'bail out'}`
+            : `${hv.action}: BOOST · ${hv.shoot}: ${has ? 'shoot / dunk' : 'jump off'}`;
+      } else if (it && h.state === 'move') {
+        const verb = it.kind === 'bat' ? `SWING (${it.uses})` : it.kind === 'hammer' ? `SLAM (${it.uses})` : it.kind === 'ext' ? `SPRAY (${it.uses})`
+          : it.kind === 'bomb' ? `THROW IT! ${Math.max(0, it.fuse).toFixed(1)}` : 'THROW';
+        line = `${hv.action}: ${verb}`;
+      }
+      if (!line) continue;
+      const x = h.x - camX, y = sy(h.z, h.y) - (r ? 168 : 150);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 12px "Trebuchet MS", sans-serif';
+      const w = ctx.measureText(line).width + 14;
+      ctx.fillStyle = 'rgba(12,8,28,0.85)';
+      roundRect(ctx, x - w / 2, y - 13, w, 18, 6); ctx.fill();
+      ctx.fillStyle = it?.kind === 'bomb' && !r ? '#ff5a5a' : hv.color;
+      ctx.fillText(line, x, y);
+    }
+
     this.drawParticles(camX);
     this.drawPopups(camX);
     ctx.restore();
+
+    this.drawWeather(game);
 
     if (this.flash > 0) {
       ctx.fillStyle = `rgba(255,250,230,${this.flash * 0.6})`;
@@ -486,6 +680,81 @@ export class Renderer {
     if (opts.hud) {
       this.drawHud(game, humans);
       this.drawBanner();
+    }
+  }
+
+  /** An item on the floor, in the air, or in its carrier's hand (a bat and a hammer follow the swing). */
+  private drawItemAt(game: Game, it: Item, camX: number) {
+    const ctx = this.ctx;
+    const time = game.time;
+    if (it.state !== 'held' || it.holder === null) {
+      drawItem(ctx, it.kind, it.x - camX, sy(it.z, it.y), it.state === 'thrown' ? it.spin : 0, it.fuse, time, it.armed);
+      return;
+    }
+    const h = game.players[it.holder];
+    const hd = handPos(h.id);
+    const x = h.x - camX + (hd ? hd.dx : h.facing * 12), y = sy(h.z, h.y) + (hd ? hd.dy : -42);
+    const f = h.facing;
+    if (it.kind === 'bat' || it.kind === 'hammer') {
+      let a = 0.45;
+      if (it.kind === 'bat' && h.state === 'punch' && h.weapon === 'bat') {
+        a = h.t < 0.1 ? -1.3 : h.t < 0.22 ? -1.3 + ((h.t - 0.1) / 0.12) * 3.1 : 1.8 - Math.min(0.5, (h.t - 0.22) * 2);
+      } else if (it.kind === 'hammer' && h.state === 'pound') {
+        a = h.t < 0.2 ? -0.5 : h.t < 0.26 ? -0.5 + ((h.t - 0.2) / 0.06) * 2.7 : 2.2;
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a * f);
+      ctx.scale(1.25, 1.25);
+      if (it.kind === 'bat') drawBat(ctx); else drawHammer(ctx);
+      ctx.restore();
+      return;
+    }
+    drawItem(ctx, it.kind, x + f * 4, y + 6, it.kind === 'ext' ? f * 0.25 : 0, it.fuse, time);
+  }
+
+  /** Screen-space weather for the event that is running: rain, floating dust, wind streaks. */
+  private drawWeather(game: Game) {
+    const ctx = this.ctx;
+    const time = game.time;
+    const ev = game.toys.event?.kind;
+    const hash = (i: number) => { const v = Math.sin(i * 127.1) * 43758.5453; return v - Math.floor(v); };
+    if (ev === 'rain') {
+      ctx.fillStyle = 'rgba(40,60,110,0.16)';
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.strokeStyle = 'rgba(190,215,255,0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i < 90; i++) {
+        const x = (hash(i) * (VIEW_W + 200) - time * 140 + 4000) % (VIEW_W + 200) - 100;
+        const y = (hash(i + 500) * VIEW_H + time * (760 + hash(i + 900) * 300)) % VIEW_H;
+        ctx.moveTo(x, y); ctx.lineTo(x - 5, y + 18);
+      }
+      ctx.stroke();
+    } else if (ev === 'lowgrav') {
+      ctx.fillStyle = 'rgba(110,70,220,0.12)';
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.fillStyle = 'rgba(225,210,255,0.6)';
+      for (let i = 0; i < 40; i++) {
+        const x = (hash(i) * VIEW_W + Math.sin(time * 0.7 + i) * 20 + VIEW_W) % VIEW_W;
+        const y = VIEW_H - ((hash(i + 300) * VIEW_H + time * (18 + hash(i + 700) * 30)) % VIEW_H);
+        ctx.fillRect(x, y, 2.5, 2.5);
+      }
+    }
+    const gust = game.toys.gust;
+    if (gust) {
+      ctx.strokeStyle = 'rgba(235,245,255,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 26; i++) {
+        const span = VIEW_W + 300;
+        let x = (hash(i + 40) * span + time * (700 + hash(i) * 500)) % span - 150;
+        if (gust.dir < 0) x = VIEW_W - x;
+        const y = 40 + hash(i + 80) * 400;
+        const len = 50 + hash(i + 120) * 70;
+        ctx.moveTo(x, y); ctx.lineTo(x - gust.dir * len, y + Math.sin(time * 3 + i) * 3);
+      }
+      ctx.stroke();
     }
   }
 
@@ -524,6 +793,24 @@ export class Renderer {
           x: b.x, y: b.y, z: b.z,
           vx: (this.rnd() - 0.5) * 60, vy: (this.rnd() - 0.5) * 60, vz: 0,
           life: 0, max: 0.4, color: ['#fff3a0', '#ffb347', '#ff5a1f'][i], size: 7 - i * 1.5, kind: 'fire', grav: -60,
+        });
+      }
+    }
+    // Sparks off every lit fuse.
+    if (fxDt > 0) {
+      for (const it of game.items) {
+        if (it.kind !== 'bomb' || it.fuse < 0 || this.rnd() > 0.5) continue;
+        this.particles.push({
+          x: it.x + 6, y: it.y + 22, z: it.z + 2, vx: (this.rnd() - 0.5) * 80, vy: 40 + this.rnd() * 80, vz: 0,
+          life: 0, max: 0.25, color: '#ffe14a', size: 2, kind: 'spark', grav: 300,
+        });
+      }
+      // A damaged tank smokes.
+      for (const r of game.toys.rides) {
+        if (r.kind !== 'tank' || r.respawn > 0 || r.hp > 2 || this.rnd() > 0.3) continue;
+        this.particles.push({
+          x: r.x - r.facing * 20, y: 44, z: r.z + 1, vx: (this.rnd() - 0.5) * 20, vy: 50 + this.rnd() * 40, vz: 0,
+          life: 0, max: 0.8, color: 'rgba(60,60,70,0.7)', size: 7, kind: 'dust', grav: -40,
         });
       }
     }
@@ -666,6 +953,23 @@ export class Renderer {
     if (game.possession === 0) { ctx.moveTo(px, y + 25); ctx.lineTo(px + 7, y + 20); ctx.lineTo(px + 7, y + 30); }
     else { ctx.moveTo(px, y + 25); ctx.lineTo(px - 7, y + 20); ctx.lineTo(px - 7, y + 30); }
     ctx.fill();
+
+    // The event that is running, with the time it has left.
+    const ev = game.toys.event;
+    if (ev) {
+      const name = EVENT_NAME[ev.kind];
+      ctx.font = 'bold 12px "Trebuchet MS", sans-serif';
+      const cw = 150, cx = (VIEW_W - cw) / 2, cy = y + 56;
+      ctx.fillStyle = 'rgba(12,8,28,0.82)';
+      roundRect(ctx, cx, cy, cw, 24, 7); ctx.fill();
+      ctx.fillStyle = '#3ff0ff';
+      ctx.textAlign = 'center';
+      ctx.fillText(name, VIEW_W / 2, cy + 13);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(cx + 8, cy + 17, cw - 16, 3);
+      ctx.fillStyle = '#3ff0ff';
+      ctx.fillRect(cx + 8, cy + 17, (cw - 16) * Math.max(0, ev.t / ev.total), 3);
+    }
 
     // RIOT meters.
     this.meter(16, VIEW_H - 34, game.hype[0], A.jersey, `${A.name.toUpperCase()} RIOT`, 'left', game.time);

@@ -35,7 +35,7 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 12 · throws, no stop after a basket';
+const VERSION = 'build 13 · bombs, bats, tank, helicopter, UFO';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -257,7 +257,7 @@ function frame(now: number) {
   const dim = { title: 0.45, card: 0.7, match: 0, paused: 0.6, results: 0.68, upgrade: 0.78, champion: 0.6 }[scene];
   const views = scene === 'title' ? [] : humans.map((h) => ({
     pid: h.pid, label: h.label, color: h.color,
-    action: solo || h.slot === 0 ? 'K' : '.', dodge: solo || h.slot === 0 ? 'L' : '/',
+    action: solo || h.slot === 0 ? 'K' : '.', dodge: solo || h.slot === 0 ? 'L' : '/', shoot: solo || h.slot === 0 ? 'J' : ',',
   }));
   renderer.render(game, dt, views, { hud: scene === 'match' || scene === 'paused', dim });
   const ctx = renderer.ctx;
@@ -347,8 +347,8 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
       ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K (tap 3 times: combo)'],
       ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K in the air'],
       ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
-      ['CALL FOR PASS', 'K when your teammate has the ball', 'THROW ITEM', 'K (walk over it first)'],
-      ['GRAB', 'Run into an opponent, or K when touching', 'IN A GRAB', 'K knee · direction + K throw'],
+      ['CALL FOR PASS', 'K when your teammate has the ball', 'USE ITEM', 'K (walk over it first)'],
+      ['GRAB', 'Run into an opponent, or K when touching', 'IN A GRAB', 'K knee · dir + K throw · up + K hoop'],
     ];
     lines.forEach((l, i) => {
       const yy = y + 24 + i * 22.5;
@@ -367,7 +367,7 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
       ['SHOOT / JUMP', 'J', ',  (comma)'],
       ['PASS / HIT / THROW', 'K', '.  (period)'],
       ['DODGE / SPECIAL', 'L', '/  (slash)'],
-      ['GRAB', 'Run into an opponent. Pass key: knee. Direction + pass key: throw', ''],
+      ['GRAB', 'Run into an opponent. Pass key: knee. Direction + pass key: throw. Up + pass key: at the hoop', ''],
     ];
     rows.forEach((r, i) => {
       const yy = y + 20 + i * 17.2;
@@ -409,11 +409,11 @@ function drawPause(ctx: CanvasRenderingContext2D) {
   drawControls(ctx, 172, !solo);
   const tips = [
     'Tap K three times: jab, cross, then a finisher that launches them and frees the ball. A miss cannot be chained.',
-    'Run into an opponent to grab them (not while you hold the ball). K knees; left or right + K throws that way.',
+    'Run into an opponent to grab them. K knees; left or right + K throws; UP + K throws them at the hoop (in = 1 point).',
     'Caught in a combo or a grab? Press L to break out (costs stamina). After a grab, wait 5 seconds for the next.',
-    'Yellow pads launch you. In the air: shoot near the rim for a 3-point sky dunk, or hold and release a shot.',
-    'Shots from high in the air go in the gold upper hoop for a bonus point.',
-    'Pass when your teammate jumps at the rim for an alley-oop.',
+    'Yellow pads launch you: shoot near the rim for a 3-point sky dunk. Shots from high up go in the gold hoop for +1.',
+    'Items: K swings the bat (bat a loose ball at the hoop!), slams the hammer, sprays, or throws. Get rid of a lit bomb.',
+    'Walk into a skateboard, tank or helicopter to ride it: K fires or boosts, J gets off. Punch a loose ball to send it flying.',
   ];
   tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 386 + i * 18, `13px ${FONT}`, '#cfd3e6', 'center', 3));
 }
