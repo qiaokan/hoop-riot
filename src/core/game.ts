@@ -1,7 +1,7 @@
 import {
   COURT, DT, DUNK_RANGE, DUNK_TIME, GRAVITY, HAND_Y, HOOP, JUMP_V, RUN_SPEED, SHOT_CLOCK,
   SPRINT_MUL, THREE_PT, TeamId, attackDir, attackHoopX, ownHoopX, DEFAULT_MATCH_SECONDS,
-  BALL_R, GRAB_COOLDOWN, HIGH_MIN_Y, HIGH_RIM_Y, LAUNCH_V, PAD_RECHARGE,
+  BALL_R, GRAB_CLINCH, GRAB_COOLDOWN, GRAB_HOLD, GRAB_IMMUNE, HIGH_MIN_Y, HIGH_RIM_Y, LAUNCH_V, PAD_RECHARGE,
 } from './constants';
 import { makeRng } from './rng';
 import { DEFAULT_STAGE } from './teams';
@@ -227,6 +227,8 @@ export class Game {
   toys: Toys;
   /** Knockdowns caused by the court itself rather than by a player. */
   envKos = 0;
+  /** Knockdowns by cause, for the balance meter. */
+  koCauses: Record<string, number> = {};
   events: GameEvent[] = [];
   readonly rng: () => number;
   private nextPossession: TeamId = 0;
@@ -509,7 +511,7 @@ export class Game {
             if (o.id === p.id || o.team !== p.team || !this.hittable(o) || o.state === 'dunk') continue;
             if (distXZ(p.x, p.z, o.x, o.z) < 26 && Math.abs(o.y - p.y) < 60) {
               p.bowled = true;
-              this.knockDown(o, Math.sign(p.vx) || 1, (1 - p.team) as TeamId, 220, 240);
+              this.knockDown(o, Math.sign(p.vx) || 1, (1 - p.team) as TeamId, 220, 240, 'bowled');
               o.freeze = 0.09; p.freeze = 0.09;
               p.vx *= 0.5;
               break;
@@ -597,14 +599,14 @@ export class Game {
         p.vx *= 0.7; p.vz *= 0.7;
         p.kneeT = Math.max(0, p.kneeT - DT);
         if (!o || o.state !== 'held' || o.heldBy !== p.id) { p.state = 'move'; p.t = 0; p.grabId = -1; break; }
-        if (takeAction()) {
+        if (p.t >= GRAB_CLINCH && takeAction()) {
           const way = intent.mx * p.facing;
           // Up + action aims the throw at the hoop: a body through the rim is a point.
           if (intent.mz < -0.5 && Math.abs(intent.mx) < 0.5) this.startToss(p, Math.sign(attackHoopX(p.team) - p.x) || p.facing, true);
           else if (way < -0.3) this.startToss(p, -p.facing);
           else if (way > 0.3 || p.knees >= 2) this.startToss(p, p.facing);
           else this.kneeStrike(p, o);
-        } else if (p.t > 1.1 + p.knees * 0.3) this.releaseGrab(p, o, false);
+        } else if (p.t > GRAB_HOLD + p.knees * 0.3) this.releaseGrab(p, o, false);
         break;
       }
       case 'held': {
@@ -613,7 +615,7 @@ export class Game {
         if (!g || !(tossing || (g.state === 'grab' && g.grabId === p.id))) {
           // The hold was broken by someone else. If it happened mid-throw, the victim is dropped.
           p.heldBy = -1; p.grabCd = 1.5; p.rot = 0;
-          if (p.y > 6) this.knockDown(p, p.facing, (1 - p.team) as TeamId, 60, 100);
+          if (p.y > 6) this.knockDown(p, p.facing, (1 - p.team) as TeamId, 60, 100, 'dropped');
           else { p.state = 'move'; p.t = 0; }
           break;
         }
@@ -629,6 +631,8 @@ export class Game {
           // Pinned in front of the grabber. A dodge wrenches free for a fifth of the stamina bar.
           p.x = g.x + g.facing * 24; p.y = 0; p.rot = 0;
           if (pressedSpecial && p.stamina >= 0.2) { p.stamina -= 0.2; this.releaseGrab(g, p, true); }
+          // Out of breath? The ball can still be passed out of the hold. The body stays held.
+          else if (this.ball.holder === p.id && takeAction()) this.passToMate(p, true);
         }
         return; // position is fully driven by the grabber
       }
@@ -729,7 +733,7 @@ export class Game {
         if (p.state === 'move' && !hasBall && !airborne && intent.grab) {
           const o = this.grabTarget(p, mx, mz, true);
           if (!o) p.pushT = Math.max(0, p.pushT - DT);
-          else { p.pushT += DT; if (p.pushT > 0.05) this.startGrab(p, o); }
+          else { p.pushT += DT; if (p.pushT > 0.12) this.startGrab(p, o); }
         } else p.pushT = 0;
         break;
       }
@@ -906,7 +910,7 @@ export class Game {
     this.emit('shockwave', p.x, 30, p.z, { player: p.id, team: p.team, text: 'SHOCKWAVE!' });
     for (const o of this.opponents(p)) {
       if (!this.hittable(o)) continue;
-      if (distXZ(p.x, p.z, o.x, o.z) < 140) this.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 340, 520);
+      if (distXZ(p.x, p.z, o.x, o.z) < 140) this.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 340, 520, 'shockwave');
     }
     p.state = 'punch'; p.t = 0; p.punchHit = true; p.combo = 2; p.weapon = null;
     this.hitstop = 0.12;
@@ -1021,7 +1025,7 @@ export class Game {
       for (const o of this.opponents(p)) {
         if (!this.hittable(o)) continue;
         // The slam flies high, so it floors anyone it passes over as well as anyone it meets.
-        if (distXZ(p.x, p.z, o.x, o.z) < 44 && o.y < p.y + 80) this.knockDown(o, p.facing, p.team, 320);
+        if (distXZ(p.x, p.z, o.x, o.z) < 44 && o.y < p.y + 80) this.knockDown(o, p.facing, p.team, 320, 380, 'megaslam');
       }
     }
     if (u < 1) return;
@@ -1056,7 +1060,7 @@ export class Game {
     this.toys.damageRim(rim, points === 3 ? 2 : 1);
   }
 
-  private passToMate(p: Player) {
+  private passToMate(p: Player, held = false) {
     const mate = this.teammate(p);
     if (!this.canAct(mate)) return;
     const b = this.ball;
@@ -1081,9 +1085,7 @@ export class Game {
     b.state = 'pass';
     b.holder = null;
     b.pass = { from: p.id, to: mate.id, t: 0, T, oop };
-    p.state = 'pass';
-    p.t = 0;
-    p.facing = tx > p.x ? 1 : -1;
+    if (!held) { p.state = 'pass'; p.t = 0; p.facing = tx > p.x ? 1 : -1; }
     this.passCall[p.team] = 0;
     this.emit(oop ? 'oop' : 'pass', b.x, b.y, b.z, { player: p.id });
   }
@@ -1166,7 +1168,7 @@ export class Game {
       else if (kind === 'tackle') { force = 330; lift = 220; }
       else if (kind === 'airkick') { force = 300; lift = o.y > 30 ? -380 : 340; }
       else if (kind === 'bat') { force = 520; lift = 430; }
-      this.knockDown(o, a.facing, a.team, force, lift);
+      this.knockDown(o, a.facing, a.team, force, lift, o.hits < need && !heavyMove ? 'aircatch' : kind);
       o.downBy = a.id;
       o.freeze = 0.13;
     } else {
@@ -1185,7 +1187,8 @@ export class Game {
    * Throws a player off their feet: back along `dir` at `force`, up at `lift` (negative spikes an
    * airborne player into the floor). They fly, land, may bounce once, slide, then get up.
    */
-  knockDown(o: Player, dir: number, byTeam: TeamId, force: number, lift = 380) {
+  knockDown(o: Player, dir: number, byTeam: TeamId, force: number, lift = 380, cause = 'other') {
+    this.koCauses[cause] = (this.koCauses[cause] ?? 0) + 1;
     if (this.ball.holder === o.id) this.fumble(o, dir, byTeam);
     this.dropItem(o);
     o.juggles = 0; o.bodyDunked = false; o.downBy = -1; o.weapon = null;
@@ -1287,8 +1290,8 @@ export class Game {
     const d = p.tossDir, fwd = d === p.facing;
     const rot = o.rot;
     p.grabId = -1; o.heldBy = -1;
-    p.grabCd = GRAB_COOLDOWN; o.grabCd = 2;
-    this.knockDown(o, d, p.team, fwd ? 440 : 400, fwd ? 210 : 170);
+    p.grabCd = GRAB_COOLDOWN; o.grabCd = GRAB_IMMUNE;
+    this.knockDown(o, d, p.team, fwd ? 440 : 400, fwd ? 210 : 170, 'throw');
     o.downBy = p.id;
     const hx = attackHoopX(p.team);
     const d0 = distXZ(o.x, o.z, hx, HOOP.z);
@@ -1316,7 +1319,7 @@ export class Game {
   /** Ends a grab without a throw: it timed out, or the victim broke free (which staggers the grabber). */
   private releaseGrab(g: Player, o: Player, broke: boolean) {
     g.grabId = -1; o.heldBy = -1;
-    g.grabCd = GRAB_COOLDOWN; o.grabCd = 2;
+    g.grabCd = GRAB_COOLDOWN; o.grabCd = GRAB_IMMUNE;
     o.state = 'move'; o.t = 0; o.invuln = 0.3;
     o.vx = g.facing * 110;
     if (broke) {
@@ -1523,7 +1526,7 @@ export class Game {
     if (s.special) {
       for (const p of this.players) {
         if (p.team === s.team || !this.hittable(p)) continue;
-        if (distXZ(p.x, p.z, b.x, b.z) < 30 && b.y < p.y + 90) this.knockDown(p, Math.sign(b.vx) || 1, s.team, 300);
+        if (distXZ(p.x, p.z, b.x, b.z) < 30 && b.y < p.y + 90) this.knockDown(p, Math.sign(b.vx) || 1, s.team, 300, 380, 'comet');
       }
     }
     // A ball stuck bouncing around the rim for too long is simply live again.

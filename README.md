@@ -69,10 +69,10 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 - **Knockdowns are physical:** the body flies in an arc, can bounce once, slides, and bounces off the end fence. A flying body bowls over a teammate in its path.
 - A running tackle, an air kick or a thrown item knocks down at once. An air kick on an airborne player spikes them into the floor. A missed tackle leaves you sliding.
 - Hitting anyone who is in the air knocks them down.
-- **Grabs:** run or walk into an opponent and you grab them on contact. Pressing K while touching an opponent also grabs, instead of punching. You cannot grab while you hold the ball, and after a grab you must wait 5 seconds for the next (the HUD shows "GRAB READY"). A prompt over your head shows the buttons and the time left. A grab that is not used lets go after about a second. The computer only grabs when it decides to.
-- **In a grab:** K alone knees them (up to twice; the third press throws). Left or right + K throws them that way at once.
+- **Grabs:** run or walk into an opponent and you grab them on contact. Pressing K while touching an opponent also grabs, instead of punching. You cannot grab while you hold the ball, and after a grab you must wait 8 seconds for the next (the HUD shows "GRAB READY"). Someone who was just grabbed cannot be grabbed again for 4 seconds. A prompt over your head shows the buttons and the time left. A grab that is not used lets go after about a second and a half. The computer only grabs when it decides to.
+- **In a grab:** for the first 0.3 seconds (the clinch) the grabber can only hold on; that is the victim's window to get out. After it, K alone knees them (up to twice; the third press throws), and left or right + K throws them that way.
 - **Throws:** the thrower hoists the victim over their head and hurls them. The victim flies spinning, lands with a heavy slam and a bounce, drops the ball, stays down longer than from a normal knockdown, and bowls over a teammate in the way.
-- **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out for half your stamina; while held, for a fifth. Breaking a grab staggers the grabber.
+- **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out for half your stamina; while held, for a fifth. Breaking a grab staggers the grabber. A held ball carrier with no stamina left can still press K to pass the ball out; the ball gets away, the body does not.
 
 **The stage**
 - **Upper hoop:** every basket has a gold hoop above the normal one. A shot let go high in the air goes at it for a bonus point (3 from inside the arc, 4 from outside).
@@ -104,8 +104,8 @@ Swing at the right moment as a thrown item arrives and you catch it instead of b
 
 | Ride | Court | What it does |
 |---|---|---|
-| Skateboard | Arcade Alley | Twice running speed; runs opponents over. K is a burst of speed. J with the ball goes straight into a shot or a dunk |
-| Tank | Palace Court | Slow. Punches bounce off; only heavy hits and blasts wear down its 4 armour, and then it blows up. K fires an exploding shell. Loaded with the ball, K fires the ball at the hoop (less accurate from far away) |
+| Skateboard | Arcade Alley | Twice running speed; runs opponents over, one at a time: each ram slows it, costs a third of its life, and it cannot ram again for 3 seconds. K is a burst of speed. J with the ball goes straight into a shot or a dunk |
+| Tank | Palace Court | Slow. Punches bounce off; only heavy hits and blasts wear down its 4 armour, and then it blows up. K fires an exploding shell every 3 seconds (it spares your own side). Ramming works once every 3 seconds. Loaded with the ball, K fires the ball at the hoop (less accurate from far away) |
 | Helicopter | The Helipad | Flies over everyone. K drops a bomb. J bails out; with the ball near the rim that is a 3-point sky dunk |
 
 **Hazards**
@@ -117,7 +117,7 @@ Swing at the right moment as a thrown item arrives and you catch it instead of b
 | Wind, catapults | The Helipad | Gusts push the ball and anyone in the air. The pads in the lane also fling you toward the hoop you attack |
 | Wrecking ball | Palace Court | Swings the length of the middle lane |
 
-**Events** start on their own every 20 seconds or so and last 12–14 seconds, one at a time. The name and the time left show under the scoreboard.
+**Events** start on their own every 25 seconds or so and last 12–14 seconds, one at a time. The name and the time left show under the scoreboard.
 
 | Event | What changes |
 |---|---|
@@ -172,9 +172,26 @@ Upgrades (one after each win): Quick Feet, Sharpshooter, Iron Chin, Hype Man, Sp
 - `tests/toys.test.ts`: one test per item, hazard, event and ride, plus full matches on all five courts with everything switched on.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
 
+## Balance meter
+
+`npm run balance` (optionally `-- 40` for more seeds, `PLAIN=1` to strip every toy) plays whole matches headless and prints what the tuning is judged by: scores, knockdowns by cause, share of time players spend on the floor, explosions, rim breaks, and what a person chasing the ball carrier gets out of grabs.
+
+Where build 14 stands, 40 computer-vs-computer matches of 120 seconds per court (home side is always the "normal" computer):
+
+| Court | Score | Knockdowns per team | By the court | Time on the floor | Same with no toys |
+|---|---|---|---|---|---|
+| Pier 9 | 19–9 | 12.3 | 3.1 | 8.1% | 4.7% |
+| Arcade Alley | 15–18 | 13.7 | 3.0 | 8.9% | 5.1% |
+| The Helipad | 18–19 | 9.7 | 6.3 | 8.0% | 4.5% |
+| Palace Court | 12–23 | 13.7 | 8.2 | 10.6% | 6.7% |
+
+A defender who sprints at the ball carrier all match and throws the instant the grab allows it takes roughly 12–23% of the other team's possessions that way, depending on the team and the sample (about 30% against Harbor Hounds, the easy team); before this build it was 28–56%.
+
+The meter only knows how the computer plays. It says nothing about how the game feels.
+
 ## Roadmap (proposed)
 
-1. **Tuning from real play:** how often things drop and events fire, knockdown rates (high on the busier courts), grab strength, computer difficulty.
+1. **Tuning from real play:** everything so far is tuned against the balance meter (below), which only knows how the computer plays. How it feels with a person at the keys is still unjudged.
 2. **Engine and rotor sounds, more animation** for the vehicles and the new item moves.
 3. **Court picker** for Quick Match, and a way to switch toys off.
 4. **Online play** using the deterministic core with rollback.

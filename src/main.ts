@@ -35,7 +35,7 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 13 · bombs, bats, tank, helicopter, UFO';
+const VERSION = 'build 14 · balance pass, fairer grabs';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -410,7 +410,7 @@ function drawPause(ctx: CanvasRenderingContext2D) {
   const tips = [
     'Tap K three times: jab, cross, then a finisher that launches them and frees the ball. A miss cannot be chained.',
     'Run into an opponent to grab them. K knees; left or right + K throws; UP + K throws them at the hoop (in = 1 point).',
-    'Caught in a combo or a grab? Press L to break out (costs stamina). After a grab, wait 5 seconds for the next.',
+    'Caught in a combo or a grab? Press L to break out (costs stamina); no stamina, K passes the ball out. After a grab, wait 8 seconds.',
     'Yellow pads launch you: shoot near the rim for a 3-point sky dunk. Shots from high up go in the gold hoop for +1.',
     'Items: K swings the bat (bat a loose ball at the hoop!), slams the hammer, sprays, or throws. Get rid of a lit bomb.',
     'Walk into a skateboard, tank or helicopter to ride it: K fires or boosts, J gets off. Punch a loose ball to send it flying.',

@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && node scripts/build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "balance": "vite-node scripts/balance.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

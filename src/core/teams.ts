@@ -73,14 +73,14 @@ export const COURTS: Record<CourtId, CourtDef> = {
   docks: {
     id: 'docks', name: 'Pier 9', feature: 'Traffic! Cars, guard dogs, bombs and bats',
     stage: {
-      launchers: [], itemEvery: 8, items: ['can', 'crate', 'bomb', 'bat', 'banana', 'hammer', 'ext'],
+      launchers: [], itemEvery: 10, items: ['can', 'crate', 'bomb', 'bat', 'banana', 'hammer', 'ext'],
       hazards: ['car', 'dogs'], events: ['rain', 'ironball'],
     },
   },
   arcade: {
     id: 'arcade', name: 'Arcade Alley', feature: 'Pinball bumpers, four launch pads',
     stage: {
-      launchers: [{ x: 378, z: 95 }, { x: 378, z: 265 }, { x: 1122, z: 95 }, { x: 1122, z: 265 }], itemEvery: 11,
+      launchers: [{ x: 378, z: 95 }, { x: 378, z: 265 }, { x: 1122, z: 95 }, { x: 1122, z: 265 }], itemEvery: 13,
       hazards: ['bumpers'], events: ['bombball', 'bigball', 'lowgrav'], rides: [{ kind: 'board', x: 750, z: 180 }],
     },
   },
@@ -95,7 +95,7 @@ export const COURTS: Record<CourtId, CourtDef> = {
   palace: {
     id: 'palace', name: 'Palace Court', feature: 'A tank, a wrecking ball, lots of items',
     stage: {
-      launchers: [{ x: 378, z: 265 }, { x: 1122, z: 265 }], itemEvery: 11,
+      launchers: [{ x: 378, z: 265 }, { x: 1122, z: 265 }], itemEvery: 15,
       hazards: ['wrecker'], events: ['ufo', 'ironball', 'bombball'], rides: [{ kind: 'tank', x: 750, z: 300 }],
     },
   },

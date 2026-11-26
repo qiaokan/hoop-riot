@@ -223,7 +223,7 @@ describe('new mechanics', () => {
     s.d1.x = 1276; s.d1.z = 180;
     run(s, 20, () => ({ 0: { mx: 1, grab: true } }), () => s.me.state === 'grab');
     expect(s.me.state).toBe('grab');
-    run(s, 120, (f) => ({ 0: { mz: -1, action: f === 8 } }), () => s.game.score[0] > 0);
+    run(s, 120, (f) => ({ 0: { mz: -1, action: f === 20 } }), () => s.game.score[0] > 0);
     expect(s.texts).toContain('BODY DUNK! +1');
     expect(s.game.score).toEqual([1, 0]);
     expect(s.game.lastScorer).toBe(0);
@@ -236,7 +236,7 @@ describe('new mechanics', () => {
       s.me.x = 1000; s.me.z = 180;
       s.d1.x = 1026; s.d1.z = 180;
       run(s, 20, () => ({ 0: { mx: 1, grab: true } }), () => s.me.state === 'grab');
-      run(s, 150, (f) => ({ 0: { mz: -1, action: f === 8 } }), () => s.game.score[0] > 0);
+      run(s, 150, (f) => ({ 0: { mz: -1, action: f === 20 } }), () => s.game.score[0] > 0);
       made += s.game.score[0];
     }
     expect(made).toBeGreaterThan(1);
@@ -410,7 +410,7 @@ describe('events', () => {
     const s = scene();
     s.game.giveBall(s.me, true);
     s.game.toys.startEvent('bombball');
-    run(s, 60 * 7, () => ({}), () => s.me.state === 'down');
+    run(s, 60 * 9, () => ({}), () => s.me.state === 'down');
     expect(s.seen).toContain('boom');
     expect(s.me.state).toBe('down');
     expect(s.game.ball.holder).toBeNull();
@@ -471,13 +471,28 @@ describe('rides', () => {
     expect(r.rider).toBeNull();
   });
 
+  it('a ram costs the ride: one body at a time, a wait before the next, and a skateboard loses fuel', () => {
+    const { s, r } = withRide('board');
+    // Either side of the board's path, too far apart for one flying body to bowl the other over.
+    s.d1.x = 1000; s.d1.z = 165; s.d2.x = 1000; s.d2.z = 196;
+    s.game.giveBall(s.mate, true);
+    const fuel0 = r.fuel;
+    const f = run(s, 120, () => ({ 0: { mx: 1 } }), () => s.d1.state === 'down' || s.d2.state === 'down');
+    expect(f).toBeLessThan(120);
+    // Two opponents stood side by side: only one went down, and the board slowed and burned fuel.
+    expect([s.d1.state, s.d2.state].filter((x) => x === 'down').length).toBe(1);
+    expect(r.ramCd).toBeGreaterThan(2);
+    expect(fuel0 - r.fuel).toBeGreaterThan(4);
+    expect(Math.abs(r.vx)).toBeLessThan(200);
+  });
+
   it('a ride runs out and comes back later', () => {
     const { s, r } = withRide('board');
     run(s, 60 * 13);
     expect(s.me.state).not.toBe('ride');
     expect(r.respawn).toBeGreaterThan(0);
     s.me.x = 300;
-    run(s, 60 * 21);
+    run(s, 60 * 31);
     expect(r.respawn).toBe(0);
     expect(r.x).toBe(700);
   });
@@ -505,7 +520,7 @@ describe('rides', () => {
     run(s, 60, (f) => ({ 0: { action: f === 0, mx: 0.2 } }), () => s.d1.state === 'down');
     expect(s.d1.state).toBe('down');
     expect(s.seen).toContain('boom');
-    run(s, 90);
+    run(s, 190);
     s.game.giveBall(s.me, true);
     run(s, 3, (f) => ({ 0: { action: f === 0, mx: 0.2 } }));
     expect(s.texts).toContain('CANNON SHOT!');

@@ -66,9 +66,9 @@ describe('AI vs AI simulation', () => {
     console.log(`overall FG ${(pct * 100).toFixed(0)}%  knockdowns per team per match ${(totals.kos / totals.games / 2).toFixed(1)}`);
     expect(pct).toBeGreaterThan(0.45);
     expect(pct).toBeLessThan(0.93);
-    // Player-caused knockdowns only. The toys (bats, bombs, rides) add sources, and across eight matches this
-    // figure moves by a couple either way with any change, so the bound has headroom.
-    expect(totals.kos / totals.games / 2).toBeLessThan(18);
+    // Player-caused knockdowns only. About 9 with no toys on the court and 12 with them (scripts/balance.ts);
+    // across eight matches the figure moves by a couple either way with any change.
+    expect(totals.kos / totals.games / 2).toBeLessThan(16);
   });
 
   it('is deterministic for a given seed', () => {
@@ -492,7 +492,8 @@ describe('mechanics', () => {
     expect(me.state).toBe('held');
     const x0 = me.x;
     let knees = 0, liftTop = 0, spun = 0, slam3 = false, hurl = false, downFrames = 0, lastRot = 0;
-    run(game, 200, (f) => ({ 2: { mx: f < 3 ? 1 : 0, action: f === 1 } }), () => {
+    // The press waits out the clinch (the victim's window to break free), then throws at once.
+    run(game, 200, (f) => ({ 2: { mx: f < 30 ? 1 : 0, action: f === 20 } }), () => {
       for (const e of game.drainEvents()) {
         if (e.type === 'hit') knees++;
         if (e.type === 'hurl') hurl = true;

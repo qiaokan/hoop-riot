@@ -25,13 +25,13 @@ export interface AIParams {
 }
 
 export const AI_PARAMS: Record<Difficulty, AIParams> = {
-  easy: { react: 0.34, aggression: 0.1, blockSkill: 0.2, passIQ: 0.35, tackle: 0.05, dodge: 0.1, combo: 0.15, grab: 0.03, jitter: 0.17 },
+  easy: { react: 0.3, aggression: 0.13, blockSkill: 0.28, passIQ: 0.4, tackle: 0.07, dodge: 0.16, combo: 0.2, grab: 0.04, jitter: 0.15 },
   normal: { react: 0.22, aggression: 0.2, blockSkill: 0.4, passIQ: 0.55, tackle: 0.11, dodge: 0.3, combo: 0.35, grab: 0.07, jitter: 0.11 },
-  hard: { react: 0.13, aggression: 0.32, blockSkill: 0.6, passIQ: 0.7, tackle: 0.2, dodge: 0.5, combo: 0.6, grab: 0.13, jitter: 0.07 },
+  hard: { react: 0.15, aggression: 0.27, blockSkill: 0.52, passIQ: 0.68, tackle: 0.16, dodge: 0.45, combo: 0.5, grab: 0.11, jitter: 0.08 },
 };
 
 /** Multiplier on the size of the sure-make release window. */
-export const ACCURACY: Record<Difficulty, number> = { easy: 0.85, normal: 1, hard: 1.1 };
+export const ACCURACY: Record<Difficulty, number> = { easy: 0.9, normal: 1, hard: 1.05 };
 
 interface Brain {
   next: number;
@@ -64,6 +64,10 @@ interface Brain {
   /** Which grab the hoop-throw decision was made for, and what it was. */
   grabSeen: number;
   hoopToss: boolean;
+  /** Which hold the escape decision was made for, whether to get out, and after how long. */
+  heldSeen: number;
+  heldOut: boolean;
+  heldAt: number;
   /** Going to fetch an item or a ride until this time. */
   fetchUntil: number;
   fetchX: number;
@@ -75,7 +79,7 @@ const newBrain = (): Brain => ({
   tackle: false, ttx: 0, ttz: 0,
   startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
   padUntil: -9, padX: 0, padZ: 0, comboSeen: -1, comboGo: false, grabUntil: -9,
-  grabSeen: -1, hoopToss: false, fetchUntil: -9, fetchX: 0, fetchZ: 0,
+  grabSeen: -1, hoopToss: false, heldSeen: -1, heldOut: false, heldAt: 0, fetchUntil: -9, fetchX: 0, fetchZ: 0,
 });
 
 export class AIController {
@@ -116,11 +120,22 @@ export class AIController {
         return out;
       }
       b.grabSeen = -1;
-      // Being held: sometimes burn stamina to wrench free.
+      // Being held: decide once whether to get out, then do it after a reaction time. Wrench free
+      // when there is the breath for it; otherwise at least pass the ball out.
       if (p.state === 'held') {
-        if (p.stamina >= 0.2 && this.rng() < 0.008 + P.dodge * 0.06) out.special = true;
+        if (b.heldSeen !== p.heldBy) {
+          b.heldSeen = p.heldBy;
+          b.heldOut = this.rng() < 0.25 + P.dodge * 0.5 + P.passIQ * 0.3;
+          // Always inside the clinch window: the skill is in how often, not in being too slow to matter.
+          b.heldAt = 0.1 + this.rng() * 0.17;
+        }
+        if (b.heldOut && p.t >= b.heldAt) {
+          if (p.stamina >= 0.2) out.special = Math.floor(now * 15) % 2 === 0;
+          else if (g.ball.holder === p.id) out.action = Math.floor(now * 15) % 2 === 0;
+        }
         return out;
       }
+      b.heldSeen = -1;
       // Landed a punch: decide once per strike whether to throw the next one.
       if (p.state === 'punch' && p.punchHit && p.combo < 2) {
         if (b.comboSeen !== p.combo) { b.comboSeen = p.combo; b.comboGo = this.rng() < P.combo; }
@@ -237,7 +252,7 @@ export class AIController {
         return 0;
       }
       case 'hammer':
-        for (const o of opps) if (o.y < 40 && distXZ(p.x, p.z, o.x, o.z) < 105) return p.facing;
+        for (const o of opps) if (o.y < 40 && distXZ(p.x, p.z, o.x, o.z) < 88) return p.facing;
         return 0;
       case 'ext':
         for (const o of opps) {

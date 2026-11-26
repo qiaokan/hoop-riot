@@ -1,4 +1,4 @@
-import { BALL_R, COURT, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/constants';
+import { BALL_R, COURT, GRAB_HOLD, HIGH_RIM_Y, HOOP, PAD_RECHARGE, TeamId } from '../core/constants';
 import type { Game, GameEvent, Item, Player } from '../core/game';
 import type { CourtId } from '../core/teams';
 import { EVENT_NAME, RIDE } from '../core/toys';
@@ -613,7 +613,7 @@ export class Renderer {
       const x = h.x - camX + (h.state === 'grab' ? h.facing * 12 : 0), y = sy(h.z, 0) - 172;
       const lines = h.state === 'grab'
         ? [h.knees < 2 ? `${hv.action}: knee (${h.knees}/2)` : `${hv.action}: THROW!`, `LEFT / RIGHT + ${hv.action}: THROW`, `UP + ${hv.action}: AT THE HOOP`]
-        : [`${hv.dodge}: break free`];
+        : game.ball.holder === h.id ? [`${hv.dodge}: break free`, `${hv.action}: pass out`] : [`${hv.dodge}: break free`];
       ctx.textAlign = 'center';
       ctx.font = 'bold 13px "Trebuchet MS", sans-serif';
       const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18;
@@ -623,7 +623,7 @@ export class Renderer {
       lines.forEach((l, i) => { ctx.fillStyle = i === 0 ? hv.color : '#ffffff'; ctx.fillText(l, x, y + i * 17); });
       if (h.state === 'grab') {
         // Time left before the hold lets go.
-        const total = 1.1 + h.knees * 0.3, left = Math.max(0, 1 - h.t / total);
+        const total = GRAB_HOLD + h.knees * 0.3, left = Math.max(0, 1 - h.t / total);
         ctx.fillStyle = hv.color;
         ctx.fillRect(x - w / 2 + 5, y + lines.length * 17 - 9, (w - 10) * left, 3);
       }

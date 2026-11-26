@@ -34,7 +34,13 @@ export const HAND_Y = 36;
 /** Ball radius, for collisions with the rim and backboard. */
 export const BALL_R = 9;
 /** Seconds before a player can grab again after a grab ends. */
-export const GRAB_COOLDOWN = 5;
+export const GRAB_COOLDOWN = 8;
+/** Seconds a grab must be held before the grabber can knee or throw: the victim's window to get out. */
+export const GRAB_CLINCH = 0.3;
+/** Seconds a grab lasts before it lets go by itself (each knee adds 0.3). */
+export const GRAB_HOLD = 1.4;
+/** Seconds a player cannot be grabbed again after being grabbed. */
+export const GRAB_IMMUNE = 4;
 /** Rim height of the upper hoop above each basket. */
 export const HIGH_RIM_Y = 235;
 /** A shot or dunk started above this height goes at the upper hoop. */

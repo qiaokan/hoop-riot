@@ -34,6 +34,8 @@ export interface Ride {
   cd: number;
   /** Seconds until a used-up or wrecked ride comes back (0 = on the court now). */
   respawn: number;
+  /** Seconds before this ride can ram someone again. */
+  ramCd: number;
   homeX: number; homeZ: number;
 }
 
@@ -41,10 +43,10 @@ export interface Traffic { kind: 'car' | 'dogs'; lane: number; dir: 1 | -1; x: n
 export interface Shell { x: number; y: number; z: number; vx: number; team: TeamId; left: number }
 export interface Ufo { x: number; z: number; victim: number | null; phase: 'hunt' | 'lift' | 'carry'; tx: number; tz: number; cd: number }
 
-export const RIDE: Record<RideKind, { speed: number; accel: number; fuel: number; hp: number; seat: number; alt: number; ram: number; back: number }> = {
-  board: { speed: 340, accel: 7, fuel: 12, hp: 1, seat: 11, alt: 0, ram: 190, back: 20 },
-  tank: { speed: 115, accel: 4, fuel: 16, hp: 4, seat: 34, alt: 0, ram: 60, back: 25 },
-  heli: { speed: 230, accel: 4, fuel: 8, hp: 1, seat: 12, alt: 150, ram: 99999, back: 30 },
+export const RIDE: Record<RideKind, { speed: number; accel: number; fuel: number; hp: number; seat: number; alt: number; ram: number; back: number; ramEvery: number }> = {
+  board: { speed: 340, accel: 7, fuel: 12, hp: 1, seat: 11, alt: 0, ram: 190, back: 20, ramEvery: 3 },
+  tank: { speed: 115, accel: 4, fuel: 13, hp: 4, seat: 34, alt: 0, ram: 60, back: 25, ramEvery: 3 },
+  heli: { speed: 230, accel: 4, fuel: 8, hp: 1, seat: 12, alt: 150, ram: 99999, back: 30, ramEvery: 0 },
 };
 
 export class Toys {
@@ -73,7 +75,7 @@ export class Toys {
     (st.rides ?? []).forEach((r, i) => {
       this.rides.push({
         id: i, kind: r.kind, x: r.x, z: r.z, y: 0, vx: 0, vz: 0, facing: 1, rider: null,
-        hp: RIDE[r.kind].hp, fuel: RIDE[r.kind].fuel, cd: 0, respawn: 0, homeX: r.x, homeZ: r.z,
+        hp: RIDE[r.kind].hp, fuel: RIDE[r.kind].fuel, cd: 0, respawn: 0, ramCd: 0, homeX: r.x, homeZ: r.z,
       });
     });
     if (st.hazards?.includes('bumpers')) {
@@ -110,7 +112,7 @@ export class Toys {
       if (dist(p.x, p.z, b.x, b.z) > 20 || b.y < p.y - 5 || b.y > p.y + 88) continue;
       const dir = Math.sign(b.vx) || 1;
       if (p.state === 'ride' && this.absorbHit(p, b.hot >= 2)) { /* clang */ }
-      else if (b.hot >= 2 || p.y > 0 || p.state === 'dunk') g.knockDown(p, dir, b.lastTeam, 320, 360);
+      else if (b.hot >= 2 || p.y > 0 || p.state === 'dunk') g.knockDown(p, dir, b.lastTeam, 320, 360, 'ball');
       else {
         if (g.ball.holder === p.id) g.fumble(p, dir, b.lastTeam);
         p.state = 'stun'; p.t = 0; p.stunFor = 0.45; p.vx = dir * 150;
@@ -125,9 +127,9 @@ export class Toys {
   }
 
   /** A knockdown caused by the court itself (traffic, a slip, a stray blast): nobody gets credit for it. */
-  private env(p: Player, dir: number, force: number, lift: number) {
+  private env(p: Player, dir: number, force: number, lift: number, cause: string) {
     const t = other(p.team);
-    this.g.knockDown(p, dir, t, force, lift);
+    this.g.knockDown(p, dir, t, force, lift, 'court:' + cause);
     this.g.stats[t].kos--;
     this.g.envKos++;
   }
@@ -222,8 +224,8 @@ export class Toys {
           else {
             gone.add(it);
             // Something flung by a blast belongs to nobody.
-            if (it.team === null) this.env(o, Math.sign(it.vx) || 1, 300, 380);
-            else { g.knockDown(o, Math.sign(it.vx) || 1, it.team, 300); g.addHype(it.team, 0.1); }
+            if (it.team === null) this.env(o, Math.sign(it.vx) || 1, 300, 380, 'item');
+            else { g.knockDown(o, Math.sign(it.vx) || 1, it.team, 300, 380, 'item'); g.addHype(it.team, 0.1); }
             g.emit('itemhit', it.x, it.y, it.z);
           }
         } else if (it.y <= 0 || it.x < COURT.minX - 20 || it.x > COURT.maxX + 20) {
@@ -260,9 +262,9 @@ export class Toys {
     g.emit('boom', p.x + p.facing * 26, 4, p.z, { power: 1, text: 'HAMMER!' });
     for (const o of g.opponents(p)) {
       if (!g.hittable(o) || o.y > 50) continue;
-      if (dist(o.x, o.z, p.x, p.z) < 125) {
+      if (dist(o.x, o.z, p.x, p.z) < 105) {
         if (o.state === 'ride' && this.absorbHit(o, true)) continue;
-        g.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 300, 470);
+        g.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 300, 470, 'hammer');
       }
     }
     const b = g.ball;
@@ -290,7 +292,7 @@ export class Toys {
   private slip(p: Player) {
     const g = this.g;
     const sp = Math.hypot(p.vx, p.vz);
-    this.env(p, Math.sign(p.vx) || p.facing, Math.max(280, sp * 1.3), 150);
+    this.env(p, Math.sign(p.vx) || p.facing, Math.max(280, sp * 1.3), 150, 'slip');
     g.emit('slip', p.x, 30, p.z, { text: 'SLIP!' });
   }
 
@@ -298,19 +300,21 @@ export class Toys {
    * An explosion: launches every player in range (friend or foe), flings the ball, sets off other
    * bombs and scatters loose items. A flung ball is live, so a blast can score.
    */
-  blast(x: number, y: number, z: number, R: number, team: TeamId | null, source: Item | null) {
+  blast(x: number, y: number, z: number, R: number, team: TeamId | null, source: Item | null, aimed = false) {
     const g = this.g;
     g.emit('boom', x, Math.max(10, y), z, { power: 2 });
     for (const p of g.players) {
       if (p.state === 'beam' || (p.invuln > 0 && p.state !== 'down')) continue;
       const d = dist(p.x, p.z, x, z);
       if (d > R || Math.abs(p.y - y) > 130) continue;
+      // An aimed shot (a tank shell) spares the side that fired it. Bombs spare nobody.
+      if (aimed && team === p.team) continue;
       // A tank shrugs off its own side's explosions, and a helicopter is above its own bombs.
       if (p.state === 'ride' && this.rideOf(p)?.kind !== 'board' && team === p.team) continue;
       if (p.state === 'ride' && this.absorbHit(p, true, 2)) continue;
       const k = 1 - 0.5 * (d / R);
-      if (team !== null && team !== p.team) g.knockDown(p, p.x >= x ? 1 : -1, team, 380 * k, 540 * k);
-      else this.env(p, p.x >= x ? 1 : -1, 380 * k, 540 * k);
+      if (team !== null && team !== p.team) g.knockDown(p, p.x >= x ? 1 : -1, team, 380 * k, 540 * k, 'blast');
+      else this.env(p, p.x >= x ? 1 : -1, 380 * k, 540 * k, 'blast');
     }
     const b = g.ball;
     if (b.state !== 'held' && b.state !== 'scored') {
@@ -487,7 +491,7 @@ export class Toys {
             for (const p of g.players) {
               if (!g.hittable(p) || p.y > 50 || Math.abs(p.z - t.lane) > 26 || Math.abs(p.x - hx) > (car ? 62 : 22)) continue;
               if (p.state === 'ride' && this.absorbHit(p, true, 2)) continue;
-              this.env(p, t.dir, car ? 440 : 300, car ? 430 : 260);
+              this.env(p, t.dir, car ? 440 : 300, car ? 430 : 260, car ? 'car' : 'dogs');
             }
             if (free && b.y < 50 && Math.abs(b.z - t.lane) < 26 && Math.abs(b.x - hx) < (car ? 62 : 22)) {
               b.vx = t.dir * 520; b.vy = 380;
@@ -501,16 +505,16 @@ export class Toys {
 
     // Wrecking ball: a pendulum swinging the length of mid-court.
     if (this.wrecker) {
-      this.swing += DT * 1.25;
+      this.swing += DT * 1.0;
       const th = 0.75 * Math.cos(this.swing);
       const w = this.wrecker;
       const nx = COURT.midX + 400 * Math.sin(th), ny = 430 - 400 * Math.cos(th);
       w.vx = (nx - w.x) / DT;
       w.x = nx; w.y = ny;
       for (const p of g.players) {
-        if (!g.hittable(p) || Math.abs(p.z - w.z) > 34 || Math.abs(p.x - w.x) > 34 || w.y > p.y + 95 || w.y < p.y - 30) continue;
+        if (!g.hittable(p) || Math.abs(p.z - w.z) > 28 || Math.abs(p.x - w.x) > 30 || w.y > p.y + 95 || w.y < p.y - 30) continue;
         if (p.state === 'ride' && this.absorbHit(p, true, 2)) continue;
-        this.env(p, Math.sign(w.vx) || 1, 440, 430);
+        this.env(p, Math.sign(w.vx) || 1, 440, 430, 'wrecker');
       }
       if (free && Math.abs(b.z - w.z) < 34 && Math.abs(b.x - w.x) < 30 && Math.abs(b.y - w.y) < 34) {
         b.vx = (Math.sign(w.vx) || 1) * 520; b.vy = 320;
@@ -568,7 +572,7 @@ export class Toys {
     const total = kind === 'ufo' || kind === 'bombball' ? 14 : 12;
     this.event = { kind, t: total, total };
     if (kind === 'ufo') this.ufo = { x: COURT.midX, z: 60, victim: null, phase: 'hunt', tx: 0, tz: 0, cd: 1 };
-    if (kind === 'bombball') this.ballFuse = 6;
+    if (kind === 'bombball') this.ballFuse = 8;
     g.emit('event', COURT.midX, 150, HOOP.z, { text: EVENT_NAME[kind] });
   }
 
@@ -576,7 +580,7 @@ export class Toys {
     const g = this.g;
     if (this.ufo?.victim !== null && this.ufo) {
       const p = g.players[this.ufo.victim!];
-      if (p.state === 'beam') this.env(p, 1, 40, 0);
+      if (p.state === 'beam') this.env(p, 1, 40, 0, 'ufo');
     }
     this.ufo = null;
     this.event = null;
@@ -594,7 +598,7 @@ export class Toys {
       if (!pool.length) return;
       if (g.phase === 'play') this.eventTimer -= DT;
       if (this.eventTimer <= 0) {
-        this.eventTimer = 16 + g.rng() * 10;
+        this.eventTimer = 20 + g.rng() * 10;
         this.startEvent(pool[Math.floor(g.rng() * pool.length)]);
       }
       return;
@@ -613,7 +617,7 @@ export class Toys {
           if (p.team === b.lastTeam || !g.hittable(p)) continue;
           if (dist(p.x, p.z, b.x, b.z) < 22 && b.y > p.y - 5 && b.y < p.y + 90) {
             if (p.state === 'ride' && this.absorbHit(p, true)) continue;
-            g.knockDown(p, Math.sign(b.vx) || 1, b.lastTeam, 300, 340);
+            g.knockDown(p, Math.sign(b.vx) || 1, b.lastTeam, 300, 340, 'ball');
             b.vx *= 0.4; b.vz *= 0.4;
             if (b.state === 'pass') { b.state = 'loose'; b.pass = undefined; }
           }
@@ -623,7 +627,7 @@ export class Toys {
       // The ball itself is on a fuse: every few seconds it goes off, wherever it is.
       this.ballFuse -= DT;
       if (this.ballFuse <= 0) {
-        this.ballFuse = 6;
+        this.ballFuse = 8;
         this.blast(b.x, b.y, b.z, 100, null, null);
       }
     } else if (ev.kind === 'ufo' && this.ufo) this.updateUfo(this.ufo);
@@ -667,7 +671,7 @@ export class Toys {
       p.x = u.x; p.z = u.z; p.y = 160;
       if (there) {
         // Dropped from the saucer somewhere else on the court.
-        this.env(p, 1, 40, 0);
+        this.env(p, 1, 40, 0, 'ufo');
         u.phase = 'hunt'; u.victim = null; u.cd = 4;
       }
     }
@@ -690,7 +694,7 @@ export class Toys {
     this.g.emit('clang', r.x, 30, r.z);
     if (r.hp <= 0) {
       // Out of armour: the tank blows up and throws its driver.
-      r.rider = null; r.respawn = 25;
+      r.rider = null; r.respawn = 40;
       p.rideId = -1; p.state = 'move'; p.y = 0;
       this.blast(r.x, 10, r.z, 80, null, null);
     }
@@ -701,7 +705,7 @@ export class Toys {
     r.rider = null;
     p.rideId = -1;
     p.rideCd = 1.2;
-    if (usedUp) { r.respawn = 20; this.g.emit('itemhit', r.x, r.y + 10, r.z); }
+    if (usedUp) { r.respawn = r.kind === 'tank' ? 35 : 30; this.g.emit('itemhit', r.x, r.y + 10, r.z); }
   }
 
   private updateRides() {
@@ -716,6 +720,7 @@ export class Toys {
         continue;
       }
       r.cd = Math.max(0, r.cd - DT);
+      r.ramCd = Math.max(0, r.ramCd - DT);
       if (r.rider !== null) {
         // The rider was knocked off or otherwise left.
         const p = g.players[r.rider];
@@ -764,19 +769,22 @@ export class Toys {
 
     // Ramming.
     const sp = Math.hypot(r.vx, r.vz);
-    if (sp > S.ram) {
+    if (sp > S.ram && r.ramCd <= 0) {
       for (const o of g.opponents(p)) {
+        if (r.ramCd > 0) break; // one body per ram
         if (!g.hittable(o) || o.y > 50 || dist(o.x, o.z, r.x, r.z) > 32) continue;
         if (o.state === 'ride' && this.absorbHit(o, true)) continue;
-        g.knockDown(o, Math.sign(r.vx) || r.facing, p.team, r.kind === 'tank' ? 380 : 320, 320);
-        if (r.kind === 'board') { r.vx *= 0.5; r.vz *= 0.5; }
+        g.knockDown(o, Math.sign(r.vx) || r.facing, p.team, r.kind === 'tank' ? 380 : 320, 320, 'ram:' + r.kind);
+        // A ram costs the ride: it has to wind up again, and a skateboard loses a quarter of its life.
+        r.ramCd = S.ramEvery;
+        if (r.kind === 'board') { r.vx *= 0.4; r.vz *= 0.4; r.fuel -= 4; }
       }
     }
 
     // The ride's weapon.
     if (takeAction() && r.cd <= 0) {
       if (r.kind === 'tank') {
-        r.cd = 1.4;
+        r.cd = 3;
         if (g.ball.holder === p.id) {
           // Loaded with the ball: the cannon fires it at the hoop.
           const three = dist(p.x, p.z, attackHoopX(p.team), HOOP.z) > THREE_PT;
@@ -831,7 +839,7 @@ export class Toys {
         if (p.team === s.team || !g.hittable(p)) continue;
         if (Math.abs(p.x - s.x) < 22 && Math.abs(p.z - s.z) < 24 && s.y > p.y - 10 && s.y < p.y + 90) boom = true;
       }
-      if (boom) { s.left = -1; this.blast(s.x, s.y, s.z, 75, s.team, null); }
+      if (boom) { s.left = -1; this.blast(s.x, s.y, s.z, 65, s.team, null, true); }
     }
     this.shells = this.shells.filter((s) => s.left > -1);
   }
