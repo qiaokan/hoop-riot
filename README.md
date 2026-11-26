@@ -29,7 +29,7 @@ One player:
 | Move | WASD / arrows | Left stick / D-pad |
 | Sprint | Shift | RB / RT |
 | Shoot / jump | J or Space: hold to jump, let go when the marker is in the green | A |
-| Pass (with ball) / punch (without) / throw (holding an item) | K | X |
+| Pass (with ball) / punch combo (without) / throw (holding an item) | K | X |
 | Running tackle | Sprint + K without the ball | RB + X |
 | Air kick | K while jumping | X in the air |
 | Dodge (cannot be hit) | L | B / Y |
@@ -60,10 +60,13 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 - **Alley-oop:** pass to a teammate who is jumping near the rim and they dunk it.
 
 **Fighting**
-- A jab staggers but never takes the ball. Three jabs in a row knock the player down.
-- A running tackle, an air kick or a thrown item knocks down at once. A missed tackle leaves you sliding.
-- Hitting anyone who is in the air knocks them down. A knocked-down ball carrier drops the ball.
-- A dodge slips any of these and passes through defenders. It costs stamina.
+- **Combo:** tap K three times for a jab, a cross and a finisher. Each strike has a wind-up and a recovery. A strike that lands can be cancelled into the next one; a miss has to recover fully and cannot be chained.
+- **Hit pause:** when a strike lands, the attacker and the victim freeze on the impact frame for a moment while everyone else keeps moving.
+- The first two hits stagger and never take the ball. The third hit of a chain launches the victim, who drops the ball.
+- **Knockdowns are physical:** the body flies in an arc, can bounce once, slides, and bounces off the end fence. A flying body bowls over a teammate in its path.
+- A running tackle, an air kick or a thrown item knocks down at once. An air kick on an airborne player spikes them into the floor. A missed tackle leaves you sliding.
+- Hitting anyone who is in the air knocks them down.
+- **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out, at the cost of half your stamina.
 
 **The stage**
 - **Upper hoop:** every basket has a gold hoop above the normal one. A shot let go high in the air goes at it for a bonus point (3 from inside the arc, 4 from outside).

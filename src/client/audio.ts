@@ -89,14 +89,33 @@ export class Sfx {
         this.tone(620, 0.32, 'triangle', 0.22);
         this.tone(935, 0.25, 'square', 0.06);
         break;
+      case 'swing':
+        // The whoosh of a strike, hit or miss.
+        this.noise(e.power === 2 ? 0.14 : 0.08, 'bandpass', e.power === 2 ? 700 : 1100, e.power === 2 ? 0.16 : 0.1, 0.8);
+        break;
       case 'hit':
-        this.noise(0.09, 'lowpass', 900, 0.6);
-        this.tone(110, 0.1, 'sine', 0.5, 50);
+        // Layered impact: a low body thump, a mid slap and a sharp crack.
+        if (e.power === 2) {
+          this.tone(150, 0.2, 'sine', 0.75, 42);
+          this.noise(0.12, 'lowpass', 700, 0.7);
+          this.noise(0.04, 'highpass', 2200, 0.5);
+        } else {
+          this.tone(190, 0.09, 'sine', 0.55, 70);
+          this.noise(0.06, 'bandpass', 950, 0.45, 1);
+          this.noise(0.03, 'highpass', 2400, 0.4);
+        }
         break;
       case 'ko':
+        this.tone(130, 0.3, 'sine', 0.85, 36);
+        this.tone(95, 0.22, 'sawtooth', 0.22, 40);
         this.noise(0.18, 'lowpass', 600, 0.8);
-        this.tone(90, 0.3, 'sawtooth', 0.3, 35);
+        this.noise(0.05, 'highpass', 2000, 0.55);
         this.cheer(0.5);
+        break;
+      case 'slam':
+        // A body landing.
+        this.tone(e.power === 2 ? 85 : 110, e.power === 2 ? 0.2 : 0.12, 'sine', e.power === 2 ? 0.7 : 0.4, 34);
+        this.noise(e.power === 2 ? 0.16 : 0.09, 'lowpass', 320, e.power === 2 ? 0.55 : 0.3);
         break;
       case 'whistle':
         this.whistle();

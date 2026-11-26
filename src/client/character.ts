@@ -188,12 +188,32 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       }
       break;
     case 'punch':
-      rate = 50;
-      if (t < 0.05) {
-        // Wind-up: fist cocked, weight back.
+      rate = 55;
+      if (p.combo >= 2) {
+        // Finisher: sink down and load up, then drive an uppercut through the target.
+        if (t < 0.09) {
+          P.hipH = HIP - 6; P.lean = 0.3; P.armF = -0.5; P.elbowF = 1.3; P.armB = 0.9; P.elbowB = 1.4; P.fFx = 9; P.fBx = -8; P.head = 0.15;
+        } else if (t < 0.24) {
+          P.hipH = HIP + 0.5; P.hop = 7; P.lean = -0.22; P.head = -0.2; P.hipX = 6;
+          P.armF = 2.35; P.elbowF = 0.5; P.armB = -0.7; P.elbowB = 1.2; P.fFx = 10; P.fFy = 3; P.fBx = -6;
+        } else {
+          P.armF = 1.6; P.elbowF = 0.9; P.lean = 0.05; P.fFx = 8;
+        }
+      } else if (p.combo === 1) {
+        // Cross: the back hand comes through as the shoulders turn.
+        if (t < 0.05) {
+          P.armB = -0.6; P.elbowB = 1.8; P.armF = 0.9; P.elbowF = 1.4; P.lean = 0.05; P.hipX = 1;
+        } else if (t < 0.16) {
+          P.armB = 1.6; P.elbowB = 0; P.armF = -0.4; P.elbowF = 1.7; P.lean = 0.36; P.hipX = 6;
+          P.fFx = 12; P.fBx = -8; P.hipH = HIP - 2.5; P.head = 0.08;
+        } else {
+          P.armB = 1.0; P.elbowB = 0.9; P.armF = 0.6; P.elbowF = 1.3; P.lean = 0.16; P.fFx = 9;
+        }
+      } else if (t < 0.05) {
+        // Jab wind-up: fist cocked, weight back.
         P.armF = -0.7; P.elbowF = 1.9; P.lean = -0.14; P.hipX = -2; P.armB = 0.9; P.elbowB = 1.3;
       } else if (t < 0.16) {
-        // Strike: arm straight out, body lunging in behind it.
+        // Jab: arm straight out, body lunging in behind it.
         P.armF = 1.58; P.elbowF = 0; P.lean = 0.3; P.hipX = 4; P.fFx = 11; P.fBx = -7;
         P.armB = -0.5; P.elbowB = 1.4; P.hipH = HIP - 2; P.head = 0.05;
       } else {
@@ -203,8 +223,10 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
     case 'stun': {
       // Recoil: head snaps back, arms fly, body shakes.
       rate = 40;
-      const k = Math.max(0, 1 - t / 0.3);
-      P.lean = -0.38 * k - 0.05; P.head = -0.4 * k;
+      const k = Math.max(0, 1 - t / p.stunFor);
+      // Reel away from the blow: backward when hit from the front, forward when hit from behind.
+      const way = p.vx * p.facing <= 0 ? 1 : -1;
+      P.lean = (-0.42 * k - 0.05) * way; P.head = -0.45 * k * way;
       P.armF = -0.9; P.elbowF = 0.4; P.armB = -1.3; P.elbowB = 0.3;
       P.fFx = 9; P.fFy = 3 * k; P.fBx = -3; P.hipH = HIP - 1;
       P.sx = 1 - 0.08 * k; P.sy = 1 + 0.05 * k;
@@ -425,11 +447,15 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
     head();
 
     // Motion smear behind a punch as it lands.
-    if (p.state === 'punch' && p.t > 0.04 && p.t < 0.13 && !(p.punchHit && p.t < 0.02)) {
+    const fin = p.combo >= 2;
+    if (p.state === 'punch' && p.t > (fin ? 0.08 : 0.04) && p.t < (fin ? 0.2 : 0.13)) {
       ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = fin ? 5 : 4;
       ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.arc(3, -21, 22, -1.35, 0.12); ctx.stroke();
+      ctx.beginPath();
+      if (fin) ctx.arc(4, -18, 27, -1.9, 0.5); // rising arc of the uppercut
+      else ctx.arc(3, -21, 22, -1.35, 0.12);
+      ctx.stroke();
     }
     // Front arm on top.
     if (!raised) frontArm();
@@ -490,6 +516,8 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     flip = p.facing * (Math.abs(c) < 0.25 ? (c < 0 ? -0.25 : 0.25) : c);
   }
   const footY = sy(p.z, p.y) - P.hop;
+  // Hit pause: the one who got hit shakes on the spot.
+  if (p.freeze > 0 && (p.state === 'stun' || p.state === 'down')) sx += Math.sin(time * 95 + p.id) * 2.8;
 
   if (a.hitT > 0) {
     // Hit flash: draw the figure off-screen, paint it white, then stamp it.

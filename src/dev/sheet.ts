@@ -17,7 +17,7 @@ interface Move {
 }
 
 const reset = (p: Player) => {
-  p.state = 'move'; p.t = 0; p.y = 0; p.vx = 0; p.vy = 0; p.vz = 0; p.released = false; p.punchHit = false; p.launched = false; p.dunk = undefined;
+  p.state = 'move'; p.t = 0; p.y = 0; p.vx = 0; p.vy = 0; p.vz = 0; p.released = false; p.punchHit = false; p.launched = false; p.dunk = undefined; p.combo = 0;
 };
 
 const MOVES: Move[] = [
@@ -27,6 +27,15 @@ const MOVES: Move[] = [
   {
     name: 'Punch', len: 0.8,
     set: (p, t) => { if (t < 0.26) { p.state = 'punch'; p.t = t; return 'angry'; } return 'normal'; },
+  },
+  {
+    name: 'Punch combo: jab, cross, finisher', len: 1.6,
+    set: (p, t) => {
+      if (t < 0.2) { p.state = 'punch'; p.combo = 0; p.t = t; return 'angry'; }
+      if (t < 0.4) { p.state = 'punch'; p.combo = 1; p.t = t - 0.2; return 'angry'; }
+      if (t < 0.84) { p.state = 'punch'; p.combo = 2; p.t = t - 0.4; return 'angry'; }
+      return 'normal';
+    },
   },
   {
     name: 'Jump shot', len: 1.4, ball: true,

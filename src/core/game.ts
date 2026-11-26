@@ -48,6 +48,17 @@ export interface Player {
   /** In the air off a launch pad. */
   launched: boolean;
   padCd: number;
+  /** Hit pause: seconds this fighter stays frozen on the frame of impact. */
+  freeze: number;
+  /** Seconds a press of the action button stays buffered, so combo inputs are not dropped. */
+  actBuf: number;
+  /** Which strike of the punch combo this is: 0 jab, 1 cross, 2 finisher. */
+  combo: number;
+  /** How long the current stagger lasts. */
+  stunFor: number;
+  /** A knocked-down body has already bounced once / already bowled a teammate over. */
+  bounced: boolean;
+  bowled: boolean;
   /** Distance walked, drives the run cycle. */
   anim: number;
   /** Shot released this jump (so we do not release twice). */
@@ -75,7 +86,7 @@ export type GameEventType =
   | 'shoot' | 'dunk' | 'pass' | 'catch' | 'special' | 'buzzer' | 'score' | 'jump' | 'land'
   | 'violation' | 'suddendeath' | 'final' | 'shockwave' | 'tipoff'
   | 'tackle' | 'spin' | 'oop' | 'blitz' | 'megaslam'
-  | 'launch' | 'item' | 'throw' | 'itemhit';
+  | 'launch' | 'item' | 'throw' | 'itemhit' | 'swing' | 'slam';
 
 export interface GameEvent {
   type: GameEventType;
@@ -84,6 +95,8 @@ export interface GameEvent {
   points?: number;
   player?: number;
   text?: string;
+  /** Strength of a hit or landing: 1 light, 2 heavy. */
+  power?: number;
 }
 
 /** A throwable object lying on the court, carried by a player, or flying. */
@@ -175,6 +188,7 @@ export class Game {
           x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, facing: attackDir(team),
           state: 'move', t: 0, stamina: 1, hits: 0, hitTimer: 0, invuln: 0, pickupCd: 0,
           punchHit: false, blitz: false, launched: false, padCd: 0, anim: 0, released: false,
+          freeze: 0, actBuf: 0, combo: 0, stunFor: 0.36, bounced: false, bowled: false,
           prev: { shoot: false, action: false, special: false },
         });
       }
@@ -264,6 +278,7 @@ export class Game {
       p.blitz = false;
       p.launched = false;
       p.padCd = 0;
+      p.freeze = 0; p.actBuf = 0; p.combo = 0; p.bounced = false; p.bowled = false;
       if (p.team === offense) {
         p.x = own + dir * (p.slot === 0 ? 230 : 320);
         p.z = p.slot === 0 ? 190 : 90;
@@ -283,6 +298,7 @@ export class Game {
 
   private giveBall(p: Player, silent = false) {
     this.dropItem(p);
+    p.actBuf = 0; // a buffered punch must not turn into an instant pass
     const b = this.ball;
     const changed = b.lastTeam !== p.team || b.afterShot;
     b.state = 'held';
@@ -388,42 +404,79 @@ export class Game {
 
   private updatePlayer(p: Player, intent: Intent, raw: Intent) {
     const pressedShoot = intent.shoot && !p.prev.shoot;
-    const pressedAction = intent.action && !p.prev.action;
     const pressedSpecial = intent.special && !p.prev.special;
+    // The action button is buffered for a moment so presses during a hit pause or a recovery
+    // still count. takeAction() consumes the buffered press.
+    if (intent.action && !p.prev.action) p.actBuf = 0.18;
+    else p.actBuf = Math.max(0, p.actBuf - DT);
+    const takeAction = () => { if (p.actBuf <= 0) return false; p.actBuf = 0; return true; };
     p.prev.shoot = raw.shoot;
     p.prev.action = raw.action;
     p.prev.special = raw.special;
+
+    // Hit pause: attacker and victim hold the impact frame while the rest of the game goes on.
+    if (p.freeze > 0) { p.freeze -= DT; return; }
 
     p.t += DT;
     p.invuln = Math.max(0, p.invuln - DT);
     p.pickupCd = Math.max(0, p.pickupCd - DT);
     p.padCd = Math.max(0, p.padCd - DT);
-    p.hitTimer -= DT;
-    if (p.hitTimer <= 0) p.hits = 0;
 
     const hasBall = this.ball.holder === p.id;
     const airborne = p.y > 0 || p.vy > 0;
 
     switch (p.state) {
-      case 'down':
-        p.vx *= 0.9; p.vz *= 0.9;
-        if (p.t > 1.1 && !airborne) { p.state = 'move'; p.t = 0; p.invuln = 0.7; }
+      case 'down': {
+        // A body flying or sliding fast bowls over a teammate in its path.
+        if (!p.bowled && Math.hypot(p.vx, p.vz) > 200) {
+          for (const o of this.players) {
+            if (o.id === p.id || o.team !== p.team || !this.hittable(o) || o.state === 'dunk') continue;
+            if (distXZ(p.x, p.z, o.x, o.z) < 26 && Math.abs(o.y - p.y) < 60) {
+              p.bowled = true;
+              this.knockDown(o, Math.sign(p.vx) || 1, (1 - p.team) as TeamId, 220, 240);
+              o.freeze = 0.09; p.freeze = 0.09;
+              p.vx *= 0.5;
+              break;
+            }
+          }
+        }
+        if (airborne) p.t = Math.min(p.t, 0.29); // still being thrown
+        else {
+          p.vx *= 0.9; p.vz *= 0.9;
+          if (p.t > 1.1) { p.state = 'move'; p.t = 0; p.invuln = 0.7; p.hits = 0; }
+        }
         break;
+      }
       case 'stun':
         p.vx *= 0.88; p.vz *= 0.88;
-        // A short protection window after a jab, so jabs cannot be chained into a stun-lock.
-        if (p.t > 0.3) { p.state = airborne ? 'jump' : 'move'; p.t = 0; p.invuln = Math.max(p.invuln, 0.4); }
+        // Break out of a combo with a dodge, at a heavy stamina cost.
+        if (pressedSpecial && p.t > 0.06 && p.stamina >= 0.5 && !airborne) {
+          p.stamina -= 0.25;
+          p.hits = 0;
+          this.startSpin(p, intent.mx, intent.mz);
+          break;
+        }
+        if (p.t > p.stunFor) {
+          // Recovered: a short window in which the chain cannot simply be started again.
+          p.state = airborne ? 'jump' : 'move'; p.t = 0; p.hits = 0; p.invuln = Math.max(p.invuln, 0.35);
+        }
         break;
-      case 'punch':
+      case 'punch': {
+        // Combo: jab, cross, finisher. Each strike has start-up, active and recovery frames.
+        // A strike that lands can be cancelled into the next one; a miss has to recover fully.
+        const fin = p.combo >= 2;
+        const start = fin ? 0.09 : 0.05, end = fin ? 0.19 : 0.13, total = fin ? 0.44 : 0.27;
         p.vx *= 0.85; p.vz *= 0.85;
-        if (!p.punchHit && p.t > 0.05 && p.t < 0.14) this.checkHit(p, 48, 24, false);
-        if (p.t > 0.26) { p.state = 'move'; p.t = 0; }
+        if (!p.punchHit && p.t > start && p.t < end) this.checkHit(p, fin ? 54 : 48, 24, fin ? 'finisher' : 'jab');
+        if (p.punchHit && !fin && p.t > end && takeAction()) this.startPunch(p, p.combo + 1);
+        else if (p.t > total) { p.state = 'move'; p.t = 0; p.combo = 0; }
         break;
+      }
       case 'tackle': {
         const active = p.t < (p.blitz ? 0.45 : 0.3) && !p.punchHit;
         if (active) {
           if (p.blitz && this.homeBlitz(p)) break;
-          this.checkHit(p, 42, 28, true);
+          this.checkHit(p, 42, 28, 'tackle');
           if (p.punchHit) { p.vx *= 0.3; p.vz *= 0.3; }
         } else {
           p.vx *= 0.86; p.vz *= 0.86;
@@ -433,7 +486,7 @@ export class Game {
         break;
       }
       case 'airkick':
-        if (!p.punchHit) this.checkHit(p, 46, 26, true);
+        if (!p.punchHit) this.checkHit(p, 46, 26, 'airkick');
         break;
       case 'spin':
         if (p.t > 0.28) { p.state = 'move'; p.t = 0; }
@@ -459,9 +512,9 @@ export class Game {
           // Off a launch pad: dunk if the rim is close, otherwise hold for an air shot.
           if (distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200) this.startSkyDunk(p);
           else p.state = 'shoot';
-        } else if (!hasBall && pressedAction && this.heldItem(p)) {
+        } else if (!hasBall && this.heldItem(p) && takeAction()) {
           this.throwItem(p, this.heldItem(p)!);
-        } else if (!hasBall && pressedAction && p.y > 8) {
+        } else if (!hasBall && p.y > 8 && takeAction()) {
           p.state = 'airkick'; p.t = 0; p.punchHit = false;
           if (intent.face) p.facing = intent.face;
           else if (Math.abs(intent.mx) > 0.15) p.facing = intent.mx > 0 ? 1 : -1;
@@ -495,7 +548,7 @@ export class Game {
             const towardHoop = Math.sign(hx - p.x) === Math.sign(p.vx) || d < 70;
             if (d < DUNK_RANGE && (sprinting || d < 95) && towardHoop) this.startDunk(p);
             else this.startJumpShot(p);
-          } else if (pressedAction) this.passToMate(p);
+          } else if (takeAction()) this.passToMate(p);
         } else {
           const h = this.holder();
           const mateHasBall = !!h && h.team === p.team && this.ball.state === 'held';
@@ -508,15 +561,12 @@ export class Game {
             // Jumping near the rim while a teammate has the ball asks for a lob.
             const lob = mateHasBall && distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200;
             this.emit('jump', p.x, 0, p.z, { player: p.id, text: lob ? 'LOB!' : undefined });
-          } else if (pressedAction) {
+          } else if (takeAction()) {
             const it = this.heldItem(p);
             if (it) this.throwItem(p, it);
             else if (mateHasBall) this.passCall[p.team] = 0.8;
             else if (sprinting) this.startTackle(p, mx, mz);
-            else {
-              p.state = 'punch'; p.t = 0; p.punchHit = false;
-              p.vx += p.facing * 70;
-            }
+            else this.startPunch(p, 0);
           }
         }
         break;
@@ -529,18 +579,32 @@ export class Game {
       p.y += p.vy * DT;
       p.vx *= 0.995;
       if (p.y <= 0) {
+        const vyIn = p.vy;
         p.y = 0;
         p.vy = 0;
         if (p.state === 'shoot' && this.ball.holder === p.id && !p.released) this.releaseShot(p, true);
         p.launched = false;
         if (p.state === 'jump' || p.state === 'shoot' || p.state === 'airkick') { p.state = 'move'; p.t = 0; }
-        this.emit('land', p.x, 0, p.z, { player: p.id });
+        if (p.state === 'down') {
+          if (vyIn < -230 && !p.bounced) {
+            // A hard landing bounces once before the body settles.
+            p.bounced = true;
+            p.vy = -vyIn * 0.36;
+            p.vx *= 0.75;
+            this.emit('slam', p.x, 0, p.z, { player: p.id, power: 2 });
+          } else {
+            p.t = Math.max(p.t, 0.3);
+            if (vyIn < -90) this.emit('slam', p.x, 0, p.z, { player: p.id, power: 1 });
+          }
+        } else this.emit('land', p.x, 0, p.z, { player: p.id });
       }
     }
     p.x += p.vx * DT;
     p.z += p.vz * DT;
-    if (p.x < COURT.minX) { p.x = COURT.minX; p.vx = Math.max(0, p.vx); }
-    if (p.x > COURT.maxX) { p.x = COURT.maxX; p.vx = Math.min(0, p.vx); }
+    // A body thrown into the end fence bounces off it.
+    const wall = p.state === 'down' && Math.abs(p.vx) > 220;
+    if (p.x < COURT.minX) { p.x = COURT.minX; p.vx = wall ? -p.vx * 0.45 : Math.max(0, p.vx); if (wall) this.emit('slam', p.x, p.y + 30, p.z, { player: p.id, power: 2 }); }
+    if (p.x > COURT.maxX) { p.x = COURT.maxX; p.vx = wall ? -p.vx * 0.45 : Math.min(0, p.vx); if (wall) this.emit('slam', p.x, p.y + 30, p.z, { player: p.id, power: 2 }); }
     if (p.z < COURT.minZ) { p.z = COURT.minZ; p.vz = Math.max(0, p.vz); }
     if (p.z > COURT.maxZ) { p.z = COURT.maxZ; p.vz = Math.min(0, p.vz); }
     if (p.y === 0) p.anim += Math.hypot(p.vx, p.vz) * DT;
@@ -564,6 +628,11 @@ export class Game {
           a.z -= (nz * push) / 1.4; b.z += (nz * push) / 1.4;
         }
       }
+    }
+    // Pushing must never shove anyone off the court (frozen fighters skip their own clamp).
+    for (const p of ps) {
+      p.x = clamp(p.x, COURT.minX, COURT.maxX);
+      p.z = clamp(p.z, COURT.minZ, COURT.maxZ);
     }
   }
 
@@ -673,9 +742,9 @@ export class Game {
     this.emit('shockwave', p.x, 30, p.z, { player: p.id, team: p.team, text: 'SHOCKWAVE!' });
     for (const o of this.opponents(p)) {
       if (!this.hittable(o)) continue;
-      if (distXZ(p.x, p.z, o.x, o.z) < 140) this.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 340);
+      if (distXZ(p.x, p.z, o.x, o.z) < 140) this.knockDown(o, o.x >= p.x ? 1 : -1, p.team, 340, 520);
     }
-    p.state = 'punch'; p.t = 0; p.punchHit = true;
+    p.state = 'punch'; p.t = 0; p.punchHit = true; p.combo = 2;
     this.hitstop = 0.12;
   }
 
@@ -846,54 +915,78 @@ export class Game {
 
   // ---------------------------------------------------------------- fighting
 
-  /** Hit test for the attacker's current move. Heavy moves (tackle, air kick) always knock down. */
-  private checkHit(a: Player, reach: number, zr: number, heavy: boolean) {
+  private startPunch(p: Player, combo: number) {
+    p.state = 'punch';
+    p.t = 0;
+    p.punchHit = false;
+    p.combo = combo;
+    // Each strike steps in a little further than the last, so the string stays in range.
+    p.vx += p.facing * [90, 140, 170][combo];
+    this.emit('swing', p.x + p.facing * 20, p.y + 46, p.z, { player: p.id, power: combo >= 2 ? 2 : 1 });
+  }
+
+  /** Hit test for the attacker's current move. */
+  private checkHit(a: Player, reach: number, zr: number, kind: 'jab' | 'finisher' | 'tackle' | 'airkick') {
     for (const o of this.opponents(a)) {
       if (!this.hittable(o)) continue;
-      if (!heavy && o.state === 'stun') continue;
       const dx = (o.x - a.x) * a.facing;
       if (dx < -6 || dx > reach) continue;
       if (Math.abs(o.z - a.z) > zr) continue;
       if (Math.abs(o.y - a.y) > 58) continue;
       a.punchHit = true;
-      this.hitPlayer(o, a, heavy);
+      this.hitPlayer(o, a, kind);
       return;
     }
   }
 
-  private hitPlayer(o: Player, a: Player, forceHeavy: boolean) {
+  private hitPlayer(o: Player, a: Player, kind: 'jab' | 'finisher' | 'tackle' | 'airkick') {
     o.hits++;
-    o.hitTimer = 1.6;
     this.stats[a.team].hits++;
-    this.addHype(a.team, forceHeavy ? 0.1 : 0.07);
-    // Knockdowns come from heavy moves, a third hit in a row, or catching someone in the air.
-    // A plain jab only staggers: it never takes the ball.
+    const heavyMove = kind === 'tackle' || kind === 'airkick';
+    this.addHype(a.team, heavyMove ? 0.1 : 0.07);
+    // A knockdown comes from a heavy move, the last hit of a chain, or catching someone in the air.
+    // Lighter hits stagger: they never take the ball, and the victim can be hit again while reeling.
     const need = Math.max(1, (o.def.tough ?? 3) - (a.def.heavyHands ? 1 : 0));
-    const heavy = forceHeavy || o.hits >= need || o.state === 'dunk' || o.y > 12;
-    if (heavy) {
-      this.knockDown(o, a.facing, a.team, 260 + 120 * a.def.power);
+    const ko = heavyMove || o.hits >= need || o.state === 'dunk' || o.y > 12;
+    const cx = (a.x + o.x) / 2 + a.facing * 6;
+    if (ko) {
+      a.freeze = 0.13;
+      let force = 250 + 110 * a.def.power, lift = 380;
+      if (kind === 'finisher') { force += 60; lift = 480; }
+      else if (kind === 'tackle') { force = 330; lift = 220; }
+      else if (kind === 'airkick') { force = 300; lift = o.y > 30 ? -380 : 340; }
+      this.knockDown(o, a.facing, a.team, force, lift);
+      o.freeze = 0.13;
     } else {
+      const big = kind === 'finisher';
+      a.freeze = big ? 0.11 : 0.07;
+      o.freeze = big ? 0.11 : 0.07;
       o.state = 'stun';
       o.t = 0;
-      o.vx = a.facing * (150 + 80 * a.def.power);
-      this.hitstop = Math.max(this.hitstop, 0.05);
-      this.emit('hit', o.x, o.y + 46, o.z, { player: o.id, team: a.team });
+      o.stunFor = big ? 0.5 : 0.36;
+      o.vx = a.facing * (big ? 240 : 95 + 40 * a.def.power);
+      this.emit('hit', cx, o.y + 48, o.z, { player: o.id, team: a.team, power: big ? 2 : 1 });
     }
   }
 
-  private knockDown(o: Player, dir: number, byTeam: TeamId, force: number) {
+  /**
+   * Throws a player off their feet: back along `dir` at `force`, up at `lift` (negative spikes an
+   * airborne player into the floor). They fly, land, may bounce once, slide, then get up.
+   */
+  private knockDown(o: Player, dir: number, byTeam: TeamId, force: number, lift = 380) {
     if (this.ball.holder === o.id) this.fumble(o, dir, byTeam);
     this.dropItem(o);
     o.state = 'down';
     o.t = 0;
     o.hits = 0;
     o.blitz = false;
+    o.bounced = false;
+    o.bowled = false;
     o.vx = dir * force;
     o.vz *= 0.3;
-    if (o.y > 0) o.vy = Math.max(o.vy, 60);
+    o.vy = lift < 0 && o.y > 30 ? lift : Math.abs(lift);
     this.stats[byTeam].kos++;
-    this.hitstop = Math.max(this.hitstop, 0.09);
-    this.emit('ko', o.x, o.y + 40, o.z, { player: o.id, team: byTeam });
+    this.emit('ko', o.x, o.y + 44, o.z, { player: o.id, team: byTeam });
   }
 
   private fumble(o: Player, dir: number, byTeam: TeamId) {

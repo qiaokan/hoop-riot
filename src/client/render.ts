@@ -21,8 +21,6 @@ interface Banner { text: string; sub?: string; life: number; max: number; color:
 /** A player a person is controlling, and the tag drawn over their head. */
 export interface HumanView { pid: number; label: string; color: string }
 
-const HIT_WORDS = ['POW!', 'WHAM!', 'BAM!', 'SMACK!', 'THUD!'];
-
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   private backdrops = new Map<CourtId, Backdrop>();
@@ -110,18 +108,26 @@ export class Renderer {
     const net = (high: boolean) => (e.x < COURT.midX ? 0 : 2) + (high ? 1 : 0);
     const high = e.y > (HOOP.rimY + HIGH_RIM_Y) / 2;
     switch (e.type) {
-      case 'hit':
-        this.burst(e, 9, '#fff6a8', 'spark', 220);
-        this.impact(e, '#ffffff', 26);
-        this.popup(HIT_WORDS[Math.floor(this.rnd() * HIT_WORDS.length)], e, '#ffffff', 16);
-        this.shake = Math.max(this.shake, 4);
+      case 'hit': {
+        const heavy = (e.power ?? 1) >= 2;
+        this.burst(e, heavy ? 14 : 8, '#fff6a8', 'spark', heavy ? 300 : 210);
+        this.impact(e, '#ffffff', heavy ? 36 : 24);
+        this.shake = Math.max(this.shake, heavy ? 7 : 3.5);
         break;
+      }
       case 'ko':
-        this.burst(e, 18, '#ffd23f', 'spark', 320);
-        this.impact(e, '#ffe14a', 40);
-        this.popup('DOWN!', e, '#ff5a5a', 22);
-        this.shake = Math.max(this.shake, 9);
+        this.burst(e, 20, '#ffd23f', 'spark', 340);
+        this.impact(e, '#ffe14a', 46);
+        this.shake = Math.max(this.shake, 10);
         break;
+      case 'slam': {
+        // A body hitting the floor or the fence.
+        const hard = (e.power ?? 1) >= 2;
+        this.burst({ ...e, y: Math.max(3, e.y) }, hard ? 12 : 6, 'rgba(215,215,225,0.8)', 'dust', hard ? 150 : 90);
+        if (hard) this.ring({ ...e, y: Math.max(3, e.y) }, 'rgba(255,255,255,0.7)');
+        this.shake = Math.max(this.shake, hard ? 6 : 2.5);
+        break;
+      }
       case 'swish':
         this.netSway[net(high)] = 1;
         this.lastSwishHigh = high;

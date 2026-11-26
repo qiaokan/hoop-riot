@@ -16,14 +16,16 @@ export interface AIParams {
   tackle: number;
   /** Chance to dodge out of pressure. */
   dodge: number;
+  /** Chance to follow a landed punch with the next strike of the combo. */
+  combo: number;
   /** Shot release timing error (seconds). */
   jitter: number;
 }
 
 export const AI_PARAMS: Record<Difficulty, AIParams> = {
-  easy: { react: 0.34, aggression: 0.14, blockSkill: 0.2, passIQ: 0.35, tackle: 0.06, dodge: 0.1, jitter: 0.17 },
-  normal: { react: 0.22, aggression: 0.28, blockSkill: 0.4, passIQ: 0.55, tackle: 0.14, dodge: 0.3, jitter: 0.11 },
-  hard: { react: 0.13, aggression: 0.45, blockSkill: 0.6, passIQ: 0.7, tackle: 0.28, dodge: 0.5, jitter: 0.07 },
+  easy: { react: 0.34, aggression: 0.1, blockSkill: 0.2, passIQ: 0.35, tackle: 0.05, dodge: 0.1, combo: 0.15, jitter: 0.17 },
+  normal: { react: 0.22, aggression: 0.2, blockSkill: 0.4, passIQ: 0.55, tackle: 0.11, dodge: 0.3, combo: 0.35, jitter: 0.11 },
+  hard: { react: 0.13, aggression: 0.32, blockSkill: 0.6, passIQ: 0.7, tackle: 0.2, dodge: 0.5, combo: 0.6, jitter: 0.07 },
 };
 
 /** Multiplier on the size of the sure-make release window. */
@@ -52,13 +54,16 @@ interface Brain {
   padUntil: number;
   padX: number;
   padZ: number;
+  /** Which combo strike the follow-up decision was last made for, and what it was. */
+  comboSeen: number;
+  comboGo: boolean;
 }
 
 const newBrain = (): Brain => ({
   next: 0, tx: 0, tz: 0, sprint: false, action: false, special: false, jump: false,
   tackle: false, ttx: 0, ttz: 0,
   startShot: false, releaseIn: 0, holding: false, shootUntil: 0, hadBall: false, gotBallAt: 0, lastPunch: -9, lastTackle: -9,
-  padUntil: -9, padX: 0, padZ: 0,
+  padUntil: -9, padX: 0, padZ: 0, comboSeen: -1, comboGo: false,
 });
 
 export class AIController {
@@ -89,6 +94,17 @@ export class AIController {
 
     // Reflexes that cannot wait for the next decision tick.
     if (g.phase === 'play') {
+      // Landed a punch: decide once per strike whether to throw the next one.
+      if (p.state === 'punch' && p.punchHit && p.combo < 2) {
+        if (b.comboSeen !== p.combo) { b.comboSeen = p.combo; b.comboGo = this.rng() < P.combo; }
+        if (b.comboGo && p.t > 0.11) { out.action = true; return out; }
+      } else if (p.state !== 'punch') b.comboSeen = -1;
+      // Being hit again and again: sometimes burn stamina to dodge out of the chain.
+      if (p.state === 'stun' && p.hits >= 2 && p.stamina >= 0.5 && this.rng() < P.dodge * 0.05) {
+        out.special = true;
+        out.mx = -p.facing;
+        return out;
+      }
       // In the air off a launch pad with the ball: sky dunk near the rim, otherwise time an air shot.
       if (has && p.state === 'jump' && p.launched && !p.released) {
         if (distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 195) {

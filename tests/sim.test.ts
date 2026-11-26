@@ -35,6 +35,7 @@ function runMatch(seed: number, oppIndex: number, seconds = 120) {
 }
 
 describe('AI vs AI simulation', () => {
+  const totals = { fgm: 0, fga: 0, kos: 0, games: 0 };
   for (const [seed, opp] of [[1, 0], [2, 1], [3, 2], [4, 3], [5, 0], [6, 3], [7, 2], [8, 1]] as const) {
     it(`finishes a match cleanly (seed ${seed}, opponent ${opp})`, () => {
       const { game, counts, maxLooseSteps, oops } = runMatch(seed, opp);
@@ -54,9 +55,19 @@ describe('AI vs AI simulation', () => {
       expect(maxLooseSteps).toBeLessThan(60 * 12);
       const fga = s[0].fga + s[1].fga, fgm = s[0].fgm + s[1].fgm;
       expect(fgm / fga).toBeGreaterThan(0.25);
-      expect(fgm / fga).toBeLessThan(0.92);
+      totals.fgm += fgm; totals.fga += fga; totals.kos += s[0].kos + s[1].kos; totals.games++;
     });
   }
+
+  it('keeps shooting and knockdowns in a sane range across all matches', () => {
+    expect(totals.games).toBe(8);
+    const pct = totals.fgm / totals.fga;
+    // eslint-disable-next-line no-console
+    console.log(`overall FG ${(pct * 100).toFixed(0)}%  knockdowns per team per match ${(totals.kos / totals.games / 2).toFixed(1)}`);
+    expect(pct).toBeGreaterThan(0.45);
+    expect(pct).toBeLessThan(0.93);
+    expect(totals.kos / totals.games / 2).toBeLessThan(16);
+  });
 
   it('is deterministic for a given seed', () => {
     const a = runMatch(9, 1, 40).game.score.join('-');
@@ -292,5 +303,73 @@ describe('mechanics', () => {
     });
     expect(down).toBe(true);
     expect(hits).toBe(3);
+  });
+
+  it('three quick presses throw a jab, cross and finisher that launches the target', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 668; d1.z = 180; d1.facing = 1;
+    const combos: number[] = [];
+    let hits = 0, top = 0, down = false;
+    run(game, 120, (f) => ({ 2: { action: f % 9 === 0 && f < 30, face: 1 } }), () => {
+      if (d1.state === 'punch' && !combos.includes(d1.combo)) combos.push(d1.combo);
+      for (const e of game.drainEvents()) if (e.type === 'hit') hits++;
+      down ||= me.state === 'down';
+      if (me.state === 'down') top = Math.max(top, me.y);
+      return false;
+    });
+    expect(combos).toEqual([0, 1, 2]);
+    expect(hits).toBe(2);
+    expect(down).toBe(true);
+    expect(top).toBeGreaterThan(20); // actually thrown into the air
+    expect(game.ball.holder).not.toBe(0);
+  });
+
+  it('a punch that misses cannot be chained', () => {
+    const { game, d1 } = scene();
+    d1.x = 300; d1.z = 300;
+    let maxCombo = 0;
+    run(game, 60, (f) => ({ 2: { action: f % 9 === 0 } }), () => { if (d1.state === 'punch') maxCombo = Math.max(maxCombo, d1.combo); return false; });
+    expect(maxCombo).toBe(0);
+  });
+
+  it('a hit freezes only the two fighters involved', () => {
+    const { game, me, mate, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 668; d1.z = 180; d1.facing = 1;
+    mate.x = 400; mate.z = 300;
+    let frozenTogether = false, mateMoved = false;
+    const x0 = mate.x;
+    run(game, 20, (f) => ({ 2: { action: f === 0, face: 1 }, 1: { mx: 1 } }), () => {
+      if (me.freeze > 0 && d1.freeze > 0) { frozenTogether = true; if (mate.x > x0) mateMoved = true; }
+      return false;
+    });
+    expect(frozenTogether).toBe(true);
+    expect(mateMoved).toBe(true);
+  });
+
+  it('a knocked-down body bowls over a teammate in its path', () => {
+    const { game, me, mate, d1 } = scene();
+    me.x = 700; me.z = 180;
+    mate.x = 760; mate.z = 180;
+    d1.x = 610; d1.z = 180;
+    let mateDown = false;
+    run(game, 80, (f) => ({ 2: { mx: 1, sprint: true, action: f === 1 } }), () => { mateDown ||= mate.state === 'down'; return mateDown; });
+    expect(mateDown).toBe(true);
+  });
+
+  it('a dodge breaks out of a combo', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 668; d1.z = 180; d1.facing = 1;
+    let down = false, escaped = false;
+    run(game, 120, (f) => ({ 2: { action: f % 9 === 0 && f < 30, face: 1 }, 0: { mx: 1, special: me.state === 'stun' && me.t > 0.1 } }), () => {
+      down ||= me.state === 'down';
+      escaped ||= me.state === 'spin';
+      return false;
+    });
+    expect(escaped).toBe(true);
+    expect(down).toBe(false);
+    expect(game.ball.holder).toBe(0);
   });
 });

@@ -373,7 +373,7 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
   if (!twoP) {
     const lines = [
       ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
-      ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K'],
+      ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K (tap 3 times: combo)'],
       ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K in the air'],
       ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
       ['SWITCH PLAYER', 'Q (on defense)', 'THROW ITEM', 'K (walk over it first)'],
@@ -436,12 +436,13 @@ function drawPause(ctx: CanvasRenderingContext2D) {
   text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 156, `bold 16px ${FONT}`, '#ffffff', 'center', 4);
   drawControls(ctx, 186, !solo);
   const tips = [
-    'A jab only staggers. To take the ball: land 3 jabs, tackle, throw an item, or hit someone in the air.',
+    'Tap K three times: jab, cross, then a finisher that launches them and frees the ball. A miss cannot be chained.',
+    'Caught in a combo? Press L to dodge out. It costs half your stamina.',
     'Yellow pads launch you. In the air: shoot near the rim for a 3-point sky dunk, or hold and release a shot.',
     'Shots from high in the air go in the gold upper hoop for a bonus point.',
     'Pass when your teammate jumps at the rim for an alley-oop.',
   ];
-  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 372 + i * 20, `13px ${FONT}`, '#cfd3e6', 'center', 3));
+  tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 364 + i * 19, `13px ${FONT}`, '#cfd3e6', 'center', 3));
 }
 
 function drawResults(ctx: CanvasRenderingContext2D) {
