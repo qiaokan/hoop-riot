@@ -35,7 +35,7 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 16 · redrawn players: builds, hands, faces, cloth';
+const VERSION = 'build 17 · redrawn rides, car, dogs and saucer';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);

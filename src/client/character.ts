@@ -28,6 +28,8 @@ export interface PlayerLook {
   carrying: boolean;
   /** What this player is riding, if anything. */
   ride?: 'board' | 'tank' | 'heli' | null;
+  /** Tip the figure with the ride under it: an angle about a point `py` below the feet. */
+  tilt?: { a: number; py: number };
 }
 
 interface Pose {
@@ -175,7 +177,7 @@ function ragPose(r: Rag, p: Player, P: Pose) {
 
 const shades = new Map<string, string>();
 /** A colour made darker (k < 1) or lighter (k > 1). Takes "#rrggbb" or "rgb(r,g,b)". */
-function shade(c: string, k: number): string {
+export function shade(c: string, k: number): string {
   const key = c + k;
   let out = shades.get(key);
   if (out) return out;
@@ -941,6 +943,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   } else {
     ctx.save();
     ctx.translate(sx, footY);
+    if (look.tilt) { ctx.translate(0, look.tilt.py); ctx.rotate(look.tilt.a); ctx.translate(0, -look.tilt.py); }
     body(ctx, p, team, P, look, time, flip, ctx.getTransform(), turn);
     ctx.restore();
   }

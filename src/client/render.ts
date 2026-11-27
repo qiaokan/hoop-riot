@@ -6,7 +6,8 @@ import { Backdrop, FAR_PARALLAX, NEAR_PARALLAX, buildBackdrop } from './backgrou
 import { Mood, drawPlayer, handPos } from './character';
 import { Net } from './net';
 import { drawBall, drawHoopBack, drawHoopFront, drawPad, drawShadow, roundRect } from './sprites';
-import { drawBat, drawBumper, drawCar, drawDog, drawHammer, drawItem, drawRideBack, drawRideFront, drawShell, drawUfo, drawWrecker } from './toysprites';
+import { drawBat, drawBumper, drawHammer, drawItem, drawWrecker } from './toysprites';
+import { drawCar, drawDog, drawRideBack, drawRideFront, drawShell, drawUfo, rideTilt, stepRide } from './vehicles';
 import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, ZS, sy } from './view';
 
 interface Particle {
@@ -498,6 +499,7 @@ export class Renderer {
 
     // Depth-sorted entities.
     const labels = new Map(humans.map((h) => [h.pid, h]));
+    for (const r of toys.rides) if (r.respawn <= 0) stepRide(r, dt);
     const items: { z: number; draw: () => void }[] = [];
     for (const p of game.players) {
       const look = this.look(game, p);
@@ -508,6 +510,7 @@ export class Renderer {
           ...look, hasBall: b.holder === p.id, label: h?.label, labelColor: h?.color,
           dt, ballH: b.y - p.y, gazeX: b.x - p.x, gazeY: b.y - (p.y + 70), carrying: !!game.heldItem(p),
           ride: toys.rideOf(p)?.kind ?? null,
+          tilt: p.state === 'ride' && toys.rideOf(p) ? rideTilt(toys.rideOf(p)!) : undefined,
         }),
       });
     }
@@ -517,9 +520,8 @@ export class Renderer {
       const rider = r.rider !== null ? game.players[r.rider] : null;
       const rx = r.x - camX, ry = sy(r.z, r.y);
       const col = rider ? game.teams[rider.team].jersey : null;
-      const anim = rider ? rider.anim : r.x;
-      items.push({ z: r.z - 0.5, draw: () => drawRideBack(ctx, r.kind, rx, ry, r.facing, time, !!rider, anim) });
-      items.push({ z: r.z + 0.5, draw: () => drawRideFront(ctx, r.kind, rx, ry, r.facing, time, !!rider, anim, col) });
+      items.push({ z: r.z - 0.5, draw: () => drawRideBack(ctx, r, rx, ry, time, col) });
+      items.push({ z: r.z + 0.5, draw: () => drawRideFront(ctx, r, rx, ry, time, col) });
     }
     if (tr && tr.warn <= 0) {
       if (tr.kind === 'car') items.push({ z: tr.lane + 4, draw: () => drawCar(ctx, tr.x - camX, sy(tr.lane) + 6, tr.dir, time) });
@@ -531,9 +533,9 @@ export class Renderer {
     const wk = toys.wrecker;
     if (wk) items.push({ z: wk.z + 1, draw: () => drawWrecker(ctx, wk.x - camX, sy(wk.z, wk.y), COURT.midX - camX, sy(wk.z, 430)) });
     for (const bm of toys.bumpers) items.push({ z: bm.z, draw: () => drawBumper(ctx, bm.x - camX, sy(bm.z), bm.hit / 0.25, time) });
-    for (const sh of toys.shells) items.push({ z: sh.z, draw: () => drawShell(ctx, sh.x - camX, sy(sh.z, sh.y), Math.sign(sh.vx)) });
+    for (const sh of toys.shells) items.push({ z: sh.z, draw: () => drawShell(ctx, sh.x - camX, sy(sh.z, sh.y), Math.sign(sh.vx), time) });
     const ufo = toys.ufo;
-    if (ufo) items.push({ z: ufo.z + 3, draw: () => drawUfo(ctx, ufo.x - camX, sy(ufo.z, 215), sy(ufo.z), time, ufo.phase === 'lift' ? 1 : ufo.phase === 'carry' ? 0.5 : ufo.cd <= 0 ? 0.2 : 0) });
+    if (ufo) items.push({ z: ufo.z + 3, draw: () => drawUfo(ctx, ufo.x - camX, sy(ufo.z, 215), sy(ufo.z), time, ufo.phase === 'lift' ? 1 : ufo.phase === 'carry' ? 0.5 : ufo.cd <= 0 ? 0.2 : 0, ufo.x, dt) });
     items.push({
       z: b.z + 1,
       draw: () => {
