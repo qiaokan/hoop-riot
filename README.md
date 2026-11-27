@@ -2,6 +2,10 @@
 
 A 2-on-2 street-basketball brawler that runs in the browser. Fighting is legal: there are no refs and no fouls. It's an original game in the genre of early-90s "anything goes" street basketball. The characters, teams, art, courts and audio are all new, and everything is drawn and synthesized in code (no image or audio files).
 
+[![Hoop Riot promo video](media/hoop-riot-promo.jpg)](media/hoop-riot-promo.mp4)
+
+A 24-second promo: [media/hoop-riot-promo.mp4](media/hoop-riot-promo.mp4) (1280×720, 60 fps, with sound).
+
 ## Play
 
 ```bash
@@ -212,6 +216,20 @@ None of these is part of the game build.
 - `lineup.html`: a still contact sheet of the characters, the previous drawing code (a snapshot in `src/dev/prev_character.ts`) on the upper row of each pair and the current code below. `?from=4&n=2` picks the moves, `?who=1` the player, `?faces=1` shows every face, `?px=1` shows it at full size.
 - `garage.html`: the same for the rides, car, dogs and saucer, against a snapshot in `src/dev/prev_toysprites.ts`. `?t=2.1` picks the moment drawn, `?px=1` shows it at full size.
 - `sheet.html`: the older animated comparison against the very first sprites.
+- `promo.html`: films the promo video (below).
+
+## Promo video
+
+`media/hoop-riot-promo.mp4` is made by `scripts/promo.mjs`; nothing in it is recorded by hand. The footage is the computer playing itself from fixed seeds, stepped one exact 1/60 s frame at a time (so slow motion and effects are the same on every run), and the music is synthesized in the script at 150 beats a minute, where a beat is exactly 24 frames and every cut lands on it. The shot list, the captions and the cut are tables at the top of the script.
+
+```bash
+node scripts/promo.mjs serve     # then open http://localhost:5190/promo.html, wait for "done",
+                                 # open http://localhost:5190/promo.html?view=2d and wait again
+node scripts/promo.mjs sheets    # optional: contact sheets of every shot in .promo/sheets, to pick cuts from
+node scripts/promo.mjs cut       # media/hoop-riot-promo.mp4 and its poster
+```
+
+`sheets` and `cut` need ffmpeg (on the PATH, or `FFMPEG=/path/to/ffmpeg`). Frames and music go to `.promo/` (about 500 MB, not committed). The page uses the game's dev hooks `__hoop.start(mode, opponent, seed)` and `__hoop.tick(n)`, which takes the page off its own clock and draws exactly n frames. To find new moments, run a seeded match with `__hoop.advance(n)` and log `game.emit` calls: the events (`dunk`, `mount`, `bodydunk`, `beam`, ...) give the step to film around.
 
 ## Balance meter
 

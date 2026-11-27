@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hoop Riot promo capture</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0c0818; overflow: hidden; }
+      canvas { display: block; position: absolute; left: 0; top: 0; }
+      #status { position: fixed; left: 8px; bottom: 8px; z-index: 9; font: 14px monospace; color: #fff; background: #000a; padding: 4px 8px; }
+    </style>
+  </head>
+  <body>
+    <!-- Dev only: films the promo video. Run `node scripts/promo.mjs serve`, then open this page (see the README). -->
+    <canvas id="game" tabindex="0"></canvas>
+    <div id="status">starting</div>
+    <script type="module" src="/src/promo.ts"></script>
+  </body>
+</html>

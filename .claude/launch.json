@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "hoop-riot", "runtimeExecutable": "node", "runtimeArgs": ["scripts/dev.mjs"], "port": 5173 }
+    { "name": "hoop-riot", "runtimeExecutable": "node", "runtimeArgs": ["scripts/dev.mjs"], "port": 5173 },
+    { "name": "hoop-riot-promo", "runtimeExecutable": "node", "runtimeArgs": ["scripts/promo.mjs", "serve"], "port": 5190 }
   ]
 }

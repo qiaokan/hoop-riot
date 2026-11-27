@@ -240,9 +240,17 @@ let last = performance.now();
 let acc = 0;
 /** Dev only: stop the match where it is, so a moment can be looked at. */
 let hold = false;
+/** Dev only: the page stops running itself and is stepped by hand, one exact frame at a time. */
+let manual = false;
+let clock = 0;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  if (!manual) turn(dt, now / 1000);
+  requestAnimationFrame(frame);
+}
+/** One frame of the page: `dt` seconds have passed and the wall clock reads `t`. */
+function turn(dt: number, t: number) {
   input.poll();
   handleMenu();
 
@@ -267,14 +275,12 @@ function frame(now: number) {
   }));
   renderer.render(game, dt, views, { hud: scene === 'match' || scene === 'paused', dim });
   const ctx = renderer.ctx;
-  const t = now / 1000;
   if (scene === 'title') drawTitle(ctx, t);
   else if (scene === 'card') drawCard(ctx, t);
   else if (scene === 'paused') drawPause(ctx);
   else if (scene === 'results') drawResults(ctx);
   else if (scene === 'upgrade') drawUpgrades(ctx, t);
   else if (scene === 'champion') drawChampion(ctx, t);
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
@@ -503,9 +509,10 @@ function drawChampion(ctx: CanvasRenderingContext2D, t: number) {
   get humans() { return humans; },
   get tour() { return tour; },
   /** Start a match right away, skipping the matchup card. */
-  start(m: Mode = 'quick', opp = oppIndex) {
+  start(m: Mode = 'quick', opp = oppIndex, from?: number) {
     mode = m;
     oppIndex = opp;
+    if (from !== undefined) seed = from;
     newGame(m, matchOpp(), LENGTHS[lenIndex]);
     scene = 'match';
   },
@@ -546,6 +553,11 @@ function drawChampion(ctx: CanvasRenderingContext2D, t: number) {
   /** Jump to a scene (for automated screenshots). */
   show(s: Scene) { if (s === 'upgrade') openUpgrades(); else scene = s; },
   finish: onMatchOver,
+  /** Take the page off its own clock (dev only), then draw exactly n frames of 1/60 s each. */
+  tick(n = 1) {
+    manual = true;
+    for (let i = 0; i < n; i++) turn(DT, (clock += DT));
+  },
   /** Freeze or release the match (the picture keeps drawing). */
   hold(on = true) { hold = on; },
 };

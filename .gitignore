@@ -3,6 +3,9 @@ node_modules/
 
 # Build output
 dist/
+
+# Promo video working files (frames, music); the finished video is in media/
+.promo/
 *.tsbuildinfo
 
 # Tool caches
