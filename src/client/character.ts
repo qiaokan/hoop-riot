@@ -1,3 +1,4 @@
+import { DUNK_STAND, HOOP } from '../core/constants';
 import type { Player } from '../core/game';
 import type { PlayerDef, TeamDef } from '../core/teams';
 import { roundRect } from './sprites';
@@ -30,6 +31,8 @@ export interface PlayerLook {
   ride?: 'board' | 'tank' | 'heli' | null;
   /** Tip the figure with the ride under it: an angle about a point `py` below the feet. */
   tilt?: { a: number; py: number };
+  /** A punch that landed: where the fist meets the victim, in pixels forward of and above the feet. */
+  strike?: { x: number; y: number };
 }
 
 interface Pose {
@@ -102,6 +105,14 @@ const S = 1.34;
 const HX = 1, HR = 15;
 /** Thigh and shin length, standing hip height, ankle height. */
 const LEG = 13.2, HIP = 27.5, ANKLE = 3.5;
+/** Upper arm and forearm length: with the hand, a hanging arm reaches the middle of the thigh. */
+const ARM = 13;
+/**
+ * Where a hand has to be, when it is on something outside the body (the rim, the opponent a
+ * punch landed on): pixels forward of and above the feet, and how far the arm has given up its
+ * pose for it (0 to 1). `back` picks the back arm; `max` caps how far the arm may stretch.
+ */
+let grip: { x: number; y: number; w: number; back?: boolean; max?: number } | null = null;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const clampN = (v: number, m: number) => (v < -m ? -m : v > m ? m : v);
@@ -110,7 +121,7 @@ const SPRUNG = new Set<keyof Pose>(['armF', 'armB', 'elbowF', 'elbowB', 'lean', 
 /** Height of the body's middle above its feet, in figure units: a tumbling body turns about it. */
 const PIVOT = 44;
 /** Limb lengths for the limp-body pendulums (figure units), and where each hangs from along the body (up is positive). */
-const RAG_L = [20, 20, 25, 25];
+const RAG_L = [26, 26, 25, 25];
 const RAG_AT = [21, 21, -16, -16];
 
 /** One step of the limp limbs: gravity, the body's own acceleration and spin, and the floor. */
@@ -376,8 +387,9 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
         if (t < 0.05) {
           P.armB = -0.6; P.elbowB = 1.8; P.armF = 0.9; P.elbowF = 1.4; P.lean = 0.05; P.hipX = 1;
         } else if (t < 0.16) {
-          P.armB = 1.6; P.elbowB = 0; P.armF = -0.4; P.elbowF = 1.7; P.lean = 0.36; P.hipX = 6;
-          P.fFx = 12; P.fBx = -8; P.hipH = HIP - 2.5; P.head = 0.08;
+          // It goes in low, to the body.
+          P.armB = 1.3; P.elbowB = 0.05; P.armF = -0.4; P.elbowF = 1.7; P.lean = 0.4; P.hipX = 6;
+          P.fFx = 12; P.fBx = -8; P.hipH = HIP - 3.5; P.head = 0.1;
         } else {
           P.armB = 1.0; P.elbowB = 0.9; P.armF = 0.6; P.elbowF = 1.3; P.lean = 0.16; P.fFx = 9;
         }
@@ -393,16 +405,31 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
       }
       break;
     case 'stun': {
-      // Recoil: head snaps back, arms fly, body shakes.
+      // Reeling. What the body does depends on where the blow landed: a shot to the head snaps
+      // it back and throws the arms out; one to the body folds the victim over it; an uppercut
+      // lifts them onto their toes. The feet keep stepping under the body while it still has speed.
       rate = 40;
       const k = Math.max(0, 1 - t / p.stunFor);
-      // Reel away from the blow: backward when hit from the front, forward when hit from behind.
+      // Away from the blow: backward when hit from the front, forward when hit from behind.
       const way = p.vx * p.facing <= 0 ? 1 : -1;
-      P.lean = (-0.42 * k - 0.05) * way; P.head = -0.45 * k * way;
-      P.armF = -0.9; P.elbowF = 0.4; P.armB = -1.3; P.elbowB = 0.3;
-      P.fFx = 9; P.fFy = 3 * k; P.fBx = -3; P.hipH = HIP - 1;
+      const sp = clamp01(Math.hypot(p.vx, p.vz) / 150);
+      const ph = p.anim * 0.21, st = Math.sin(ph);
+      P.fFx = 7 + st * 7 * sp; P.fFy = Math.max(0, Math.cos(ph)) * 5 * sp;
+      P.fBx = -5 - st * 7 * sp; P.fBy = Math.max(0, -Math.cos(ph)) * 5 * sp;
       P.sx = 1 - 0.08 * k; P.sy = 1 + 0.05 * k;
-      P.hipX = Math.sin(t * 70) * 1.5 * k;
+      if (p.hitZone === 1) {
+        P.lean = way > 0 ? 0.55 * k + 0.1 : -0.38 * k; P.head = 0.35 * k * way;
+        P.hipX = -5 * k * way; P.hipH = HIP - 1 - 4.5 * k;
+        P.armF = 0.5; P.elbowF = 1.75; P.armB = 0.35; P.elbowB = 1.6;
+      } else if (p.hitZone === 2) {
+        P.lean = (-0.5 * k - 0.05) * way; P.head = -0.75 * k * way;
+        P.hop = 5 * k; P.hipH = HIP + 0.5;
+        P.armF = 0.3 + 1.2 * k; P.elbowF = 0.3; P.armB = -0.6 - 1.0 * k; P.elbowB = 0.3;
+      } else {
+        P.lean = (-0.42 * k - 0.05) * way; P.head = -0.5 * k * way;
+        P.armF = -0.3 - 0.8 * k; P.elbowF = 0.4; P.armB = -0.7 - 0.8 * k; P.elbowB = 0.3;
+        P.hipH = HIP - 1; P.hipX = Math.sin(t * 70) * 1.5 * k;
+      }
       break;
     }
     case 'down': {
@@ -539,17 +566,19 @@ function targetPose(p: Player, look: PlayerLook, time: number): { pose: Pose; ra
         P.armF = 3.5; P.elbowF = 0.5; P.armB = 0.9; P.elbowB = 0.8; P.lean = -0.3; P.head = -0.25;
         P.fFx = -3; P.fFy = 9; P.fBx = -9; P.fBy = 6;
       } else {
-        // Slamming it down.
-        P.armF = 1.9; P.elbowF = 0; P.armB = 1.2; P.elbowB = 0.5; P.lean = 0.35; P.head = 0.15;
-        P.fFx = 10; P.fFy = 7; P.fBx = 2; P.fBy = 4;
+        // Slamming it down: the body stays upright beside the rim, knees tucked, and the arm
+        // goes over the top (the hand itself is steered to the rim when the figure is drawn).
+        P.armF = 2.1; P.elbowF = 0.2; P.armB = 0.5; P.elbowB = 0.9; P.lean = -0.04; P.head = 0.18;
+        P.fFx = 9; P.fFy = 11; P.fBx = -2; P.fBy = 8;
       }
       break;
     }
     case 'hang': {
-      // Hanging off the rim, legs swinging.
-      const sw = Math.sin(t * 16) * 5;
-      P.armF = 3.0; P.elbowF = 0.1; P.armB = 2.9; P.elbowB = 0.1;
-      P.fFx = 3 + sw; P.fFy = 3; P.fBx = -3 + sw; P.fBy = 2; P.lean = -0.05 + sw * 0.012;
+      // Hanging from the rim by one hand. The legs carry on forward under it, then swing back.
+      const sw = Math.cos(t * 10) * Math.exp(-t * 2.2);
+      P.armF = 2.9; P.elbowF = 0.1; P.armB = 0.45 - sw * 0.5; P.elbowB = 0.5;
+      P.fFx = 2 + sw * 11; P.fFy = 4 + Math.max(0, sw) * 5; P.fBx = -3 + sw * 9; P.fBy = 3 + Math.max(0, sw) * 3;
+      P.lean = -0.04 - sw * 0.1; P.head = 0.08;
       break;
     }
   }
@@ -656,10 +685,14 @@ function drawHand(ctx: CanvasRenderingContext2D, x: number, y: number, dir: numb
   ctx.restore();
 }
 
+/** Length of each half of an arm. Arms stretch when raised, cartoon-style, so the hands clear the oversized head. */
+function armLen(ang: number) {
+  return ARM * (1 + 0.42 * clamp01((ang - 1.7) / 0.8) + 0.4 * clamp01((ang - 2.7) / 0.4));
+}
+
 /** An arm from the shoulder: upper arm at `ang`, forearm bent by `elbow`, ending in a hand. */
-function arm(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, elbow: number, skin: string, band: string, hand: Hand = 'fist', w = 1) {
-  // Arms stretch when raised, cartoon-style, so the hands clear the oversized head.
-  const L = 10 * (1 + 0.7 * clamp01((ang - 1.7) / 0.8) + 0.65 * clamp01((ang - 2.7) / 0.4));
+function arm(ctx: CanvasRenderingContext2D, x0: number, y0: number, ang: number, elbow: number, skin: string, band: string, hand: Hand = 'fist', w = 1, len = armLen(ang)) {
+  const L = len;
   const kx = x0 + Math.sin(ang) * L, ky = y0 + Math.cos(ang) * L;
   const a2 = ang + elbow;
   const ex = kx + Math.sin(a2) * L, ey = ky + Math.cos(a2) * L;
@@ -703,8 +736,24 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
     ctx.restore();
   };
 
+  // The hand may belong on something outside the body. Find that point in the torso's own frame,
+  // then bend (or stretch) the arm to reach it, whatever the rest of the body is doing.
+  const reach = (shoulderX: number, ang: number, el: number): [number, number, number] => {
+    const g = grip!;
+    const gx = g.x / (S * P.sx) - P.hipX, gy = -(g.y - P.hop) / (S * P.sy) - hipY;
+    const ca = Math.cos(P.lean + fig.hunch), sa = Math.sin(P.lean + fig.hunch);
+    const dx = gx * ca + gy * sa - shoulderX, dy = -gx * sa + gy * ca + 21;
+    const dist = Math.hypot(dx, dy);
+    const L = Math.min(Math.max(ARM, dist / 2), ARM * (g.max ?? 9));
+    const bend = Math.acos(Math.min(1, dist / (2 * L)));
+    const len = armLen(ang);
+    return [ang + (Math.atan2(dx, dy) - bend - ang) * g.w, el + (2 * bend - el) * g.w, len + (L - len) * g.w];
+  };
+  const gripB = !!grip && !!base && !!grip.back, gripF = !!grip && !!base && !grip.back;
+
   // Back arm, behind everything.
-  upper(() => arm(ctx, -shX, -21, P.armB, P.elbowB, shade(skin, 0.7), shade(team.trim, 0.7), handB, fig.limb * 0.95));
+  const [bAng, bEl, bLen] = gripB ? reach(-shX, P.armB, P.elbowB) : [P.armB, P.elbowB, armLen(P.armB)];
+  upper(() => arm(ctx, -shX, -21, bAng, bEl, shade(skin, 0.7), shade(team.trim, 0.7), handB, fig.limb * 0.95, bLen));
   // Legs.
   leg(ctx, P.hipX - 3, hipY, P.fBx, P.fBy, shade(team.shorts, 0.72), shade(skin, 0.8), '#cfcfd6', shade(team.trim, 0.8), LEG * fig.leg, fig.limb);
   leg(ctx, P.hipX + 3, hipY, P.fFx, P.fFy, team.shorts, skin, '#ffffff', team.trim, LEG * fig.leg, fig.limb);
@@ -766,9 +815,10 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
 
     };
     // A raised arm goes behind the head, so it never covers the face.
-    const raised = P.armF > 2.05;
+    const [fAng, fEl, fLen] = gripF ? reach(shX, P.armF, P.elbowF) : [P.armF, P.elbowF, armLen(P.armF)];
+    const raised = fAng > 2.05;
     const frontArm = () => {
-      const [ex, ey] = arm(ctx, shX, -21, P.armF, P.elbowF, skin, team.trim, handF, fig.limb);
+      const [ex, ey] = arm(ctx, shX, -21, fAng, fEl, skin, team.trim, handF, fig.limb, fLen);
       if (base) {
         const q = base.inverse().transformPoint(ctx.getTransform().transformPoint(new DOMPoint(ex, ey)));
         hands.set(p.id, { dx: q.x, dy: q.y });
@@ -944,7 +994,22 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
     ctx.save();
     ctx.translate(sx, footY);
     if (look.tilt) { ctx.translate(0, look.tilt.py); ctx.rotate(look.tilt.a); ctx.translate(0, -look.tilt.py); }
+    // A dunker's hand goes to the rim itself, and stays on it while the body hangs below.
+    if ((p.state === 'dunk' || p.state === 'hang') && p.dunk) {
+      const fwd = (p.dunk.tx + p.facing * DUNK_STAND - p.x) * p.facing, up = p.dunk.rimY - p.y;
+      if (p.state === 'hang') grip = { x: fwd - HOOP.rimR + 4, y: up + 1, w: 1 };
+      else {
+        const u = clamp01(p.t / p.dunk.T), w = clamp01((u - 0.6) / 0.2), dn = clamp01((u - 0.8) / 0.2);
+        if (w > 0) grip = { x: fwd - 6 * (1 - dn), y: up + 4 + 24 * (1 - dn), w };
+      }
+    }
+    // A punch that landed: the fist is on the victim, with the arm bent as much as the range asks.
+    if (p.state === 'punch' && look.strike && p.weapon !== 'bat') {
+      const w = clamp01(1 - (p.t - (p.combo >= 2 ? 0.14 : 0.09)) / 0.06);
+      if (w > 0) grip = { x: look.strike.x, y: look.strike.y, w, back: p.combo === 1, max: 1.15 };
+    }
     body(ctx, p, team, P, look, time, flip, ctx.getTransform(), turn);
+    grip = null;
     ctx.restore();
   }
 

@@ -815,7 +815,12 @@ export class Toys {
   }
 
   /** Called every frame for a player on a ride: steering, ramming, the ride's weapon, getting off. */
-  drive(p: Player, intent: Intent, pressedShoot: boolean, takeAction: () => boolean) {
+  /**
+   * Drives a ride. Without the ball the shoot button fires the ride's weapon; with it, the shoot
+   * button scores (a tank fires the ball, anything else is left for a dunk or a shot). The pass
+   * button gets off.
+   */
+  drive(p: Player, intent: Intent, pressedShoot: boolean, takeFight: () => boolean, takeAction: () => boolean) {
     const g = this.g;
     const r = this.rideOf(p);
     if (!r || r.rider !== p.id) { p.state = 'move'; p.t = 0; p.rideId = -1; return; }
@@ -851,7 +856,8 @@ export class Toys {
     }
 
     // The ride's weapon.
-    if (takeAction() && r.cd <= 0) {
+    const has = g.ball.holder === p.id;
+    if ((!has || r.kind === 'tank') && r.cd <= 0 && takeFight()) {
       if (r.kind === 'tank') {
         r.cd = 3;
         if (g.ball.holder === p.id) {
@@ -878,15 +884,16 @@ export class Toys {
       }
     }
 
-    // Getting off: the shoot button, or the ride running out.
-    if (pressedShoot || r.fuel <= 0) {
+    // Getting off: the pass button, the shoot button with the ball, or the ride running out.
+    const score = has && r.kind !== 'tank' && pressedShoot;
+    if (score || takeAction() || r.fuel <= 0) {
       const used = r.fuel <= 0;
       this.dismount(p, r, used);
       if (r.kind === 'heli') {
         // Bailing out of the helicopter: a sky dunk if the rim is close, otherwise a free fall you can shoot from.
-        if (g.ball.holder === p.id && pressedShoot && dist(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200 && p.y > HIGH_MIN_Y) { g.startSkyDunk(p); return; }
+        if (score && dist(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200 && p.y > HIGH_MIN_Y) { g.startSkyDunk(p); return; }
         p.state = 'jump'; p.t = 0; p.vy = 0; p.launched = true; p.released = false;
-      } else if (g.ball.holder === p.id && pressedShoot) {
+      } else if (score) {
         // Off a skateboard or out of a tank with the ball: straight into a dunk or a jump shot.
         const hx = attackHoopX(p.team);
         if (dist(p.x, p.z, hx, HOOP.z) < 215 && Math.sign(hx - p.x) === p.facing) g.startDunk(p);

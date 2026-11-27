@@ -43,7 +43,7 @@ function humanDefender(seed: number, oppIndex: number, sprint: boolean) {
     const me = game.players[0];
     const h = game.holder();
     const intents = game.players.map((p): Intent => {
-      if (p.id === 0 && me.state === 'grab') return { mx: me.facing, mz: 0, sprint: false, shoot: false, action: steps % 6 < 3, special: false, grab: true }; // throws at once
+      if (p.id === 0 && me.state === 'grab') return { mx: me.facing, mz: 0, sprint: false, shoot: steps % 6 < 3, action: false, special: false, grab: true }; // throws at once
       if (p.id !== 0 || !h || h.team === 0) return ai.intent(p);
       const dx = h.x - me.x, dz = h.z - me.z;
       if (steps % 9 === 0) { kx = Math.abs(dx) > 10 ? Math.sign(dx) : 0; kz = Math.abs(dz) > 10 ? Math.sign(dz) : 0; }

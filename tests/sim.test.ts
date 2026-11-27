@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AIController, AI_PARAMS, ACCURACY, AIParams } from '../src/core/ai';
-import { COURT, HIGH_MIN_Y, HOOP, attackHoopX } from '../src/core/constants';
+import { COURT, DUNK_STAND, HANG_FEET, HIGH_MIN_Y, HOOP, attackHoopX } from '../src/core/constants';
 import { Game, GameEventType, Intent, NO_INTENT } from '../src/core/game';
 import { COURTS, HOME_TEAM, OPPONENTS, StageDef, applyUpgrades } from '../src/core/teams';
 
@@ -142,7 +142,7 @@ describe('mechanics', () => {
     me.x = 700; me.z = 180;
     d1.x = 670; d1.z = 180; d1.facing = 1;
     let stunned = false;
-    run(game, 20, (f) => ({ 2: { action: f === 0, face: 1 } }), () => { stunned ||= me.state === 'stun'; return false; });
+    run(game, 20, (f) => ({ 2: { shoot: f === 0, face: 1 } }), () => { stunned ||= me.state === 'stun'; return false; });
     expect(stunned).toBe(true);
     expect(game.ball.holder).toBe(0);
   });
@@ -153,7 +153,7 @@ describe('mechanics', () => {
     let down = false;
     run(game, 240, (f) => {
       d1.x = me.x - 30; d1.z = me.z; d1.facing = 1;
-      return { 2: { action: f % 8 === 0, face: 1 } };
+      return { 2: { shoot: f % 8 === 0, face: 1 } };
     }, () => { down ||= me.state === 'down'; return down; });
     expect(down).toBe(true);
     expect(game.ball.holder).not.toBe(0);
@@ -164,7 +164,7 @@ describe('mechanics', () => {
     me.x = 700; me.z = 180;
     d1.x = 610; d1.z = 180;
     let down = false;
-    run(game, 40, (f) => ({ 2: { mx: 1, sprint: true, action: f === 1 } }), () => { down ||= me.state === 'down'; return down; });
+    run(game, 40, (f) => ({ 2: { mx: 1, sprint: true, shoot: f === 1 } }), () => { down ||= me.state === 'down'; return down; });
     expect(down).toBe(true);
     expect(game.ball.holder).not.toBe(0);
     expect(game.stats[1].steals).toBe(1);
@@ -175,7 +175,7 @@ describe('mechanics', () => {
     me.x = 700; me.z = 180;
     d1.x = 610; d1.z = 180;
     let down = false;
-    run(game, 40, (f) => ({ 2: { mx: 1, sprint: true, action: f === 1 }, 0: { mz: 1, special: f === 4 } }),
+    run(game, 40, (f) => ({ 2: { mx: 1, sprint: true, shoot: f === 1 }, 0: { mz: 1, special: f === 4 } }),
       () => { down ||= me.state === 'down'; return false; });
     expect(down).toBe(false);
     expect(game.ball.holder).toBe(0);
@@ -186,7 +186,7 @@ describe('mechanics', () => {
     me.x = 900; me.z = 180;
     d1.x = 940; d1.z = 180; d1.facing = -1;
     let down = false;
-    run(game, 60, (f) => ({ 0: { shoot: f >= 2 }, 2: { shoot: f === 2, action: f === 10, face: -1 } }),
+    run(game, 60, (f) => ({ 0: { shoot: f >= 2 }, 2: { action: f === 2, shoot: f === 10, face: -1 } }),
       () => { down ||= me.state === 'down'; return down; });
     expect(down).toBe(true);
   });
@@ -197,7 +197,7 @@ describe('mechanics', () => {
     me.x = hx - 350; me.z = 200;
     mate.x = hx - 90; mate.z = HOOP.z;
     const seen: string[] = [];
-    run(game, 200, (f) => ({ 1: { shoot: f === 0 }, 0: { action: f === 8 } }), () => {
+    run(game, 200, (f) => ({ 1: { action: f === 0 }, 0: { action: f === 8 } }), () => {
       for (const e of game.drainEvents()) if (e.type === 'dunk' && e.text) seen.push(e.text);
       return game.score[0] > 0;
     });
@@ -278,7 +278,7 @@ describe('mechanics', () => {
     run(game, 3, () => ({}));
     expect(game.heldItem(d1)).not.toBeNull();
     let down = false;
-    run(game, 60, (f) => ({ 2: { action: f === 0, face: -1 } }), () => { down ||= me.state === 'down'; return down; });
+    run(game, 60, (f) => ({ 2: { shoot: f === 0, face: -1 } }), () => { down ||= me.state === 'down'; return down; });
     expect(down).toBe(true);
     expect(game.items.length).toBe(0);
   });
@@ -297,7 +297,7 @@ describe('mechanics', () => {
     let hits = 0, down = false;
     run(game, 400, (f) => {
       d1.x = me.x - 30; d1.z = me.z; d1.facing = 1;
-      return { 2: { action: f % 8 === 0, face: 1 } };
+      return { 2: { shoot: f % 8 === 0, face: 1 } };
     }, () => {
       for (const e of game.drainEvents()) if (e.type === 'hit') hits++;
       down ||= me.state === 'down';
@@ -313,7 +313,7 @@ describe('mechanics', () => {
     d1.x = 668; d1.z = 180; d1.facing = 1;
     const combos: number[] = [];
     let hits = 0, top = 0, down = false;
-    run(game, 120, (f) => ({ 2: { action: f % 9 === 0 && f < 30, face: 1 } }), () => {
+    run(game, 120, (f) => ({ 2: { shoot: f % 9 === 0 && f < 30, face: 1 } }), () => {
       if (d1.state === 'punch' && !combos.includes(d1.combo)) combos.push(d1.combo);
       for (const e of game.drainEvents()) if (e.type === 'hit') hits++;
       down ||= me.state === 'down';
@@ -331,7 +331,7 @@ describe('mechanics', () => {
     const { game, d1 } = scene();
     d1.x = 300; d1.z = 300;
     let maxCombo = 0;
-    run(game, 60, (f) => ({ 2: { action: f % 9 === 0 } }), () => { if (d1.state === 'punch') maxCombo = Math.max(maxCombo, d1.combo); return false; });
+    run(game, 60, (f) => ({ 2: { shoot: f % 9 === 0 } }), () => { if (d1.state === 'punch') maxCombo = Math.max(maxCombo, d1.combo); return false; });
     expect(maxCombo).toBe(0);
   });
 
@@ -342,7 +342,7 @@ describe('mechanics', () => {
     mate.x = 400; mate.z = 300;
     let frozenTogether = false, mateMoved = false;
     const x0 = mate.x;
-    run(game, 20, (f) => ({ 2: { action: f === 0, face: 1 }, 1: { mx: 1 } }), () => {
+    run(game, 20, (f) => ({ 2: { shoot: f === 0, face: 1 }, 1: { mx: 1 } }), () => {
       if (me.freeze > 0 && d1.freeze > 0) { frozenTogether = true; if (mate.x > x0) mateMoved = true; }
       return false;
     });
@@ -356,7 +356,7 @@ describe('mechanics', () => {
     mate.x = 760; mate.z = 180;
     d1.x = 610; d1.z = 180;
     let mateDown = false;
-    run(game, 80, (f) => ({ 2: { mx: 1, sprint: true, action: f === 1 } }), () => { mateDown ||= mate.state === 'down'; return mateDown; });
+    run(game, 80, (f) => ({ 2: { mx: 1, sprint: true, shoot: f === 1 } }), () => { mateDown ||= mate.state === 'down'; return mateDown; });
     expect(mateDown).toBe(true);
   });
 
@@ -365,7 +365,7 @@ describe('mechanics', () => {
     me.x = 700; me.z = 180;
     d1.x = 668; d1.z = 180; d1.facing = 1;
     let down = false, escaped = false;
-    run(game, 120, (f) => ({ 2: { action: f % 9 === 0 && f < 30, face: 1 }, 0: { mx: 1, special: me.state === 'stun' && me.t > 0.1 } }), () => {
+    run(game, 120, (f) => ({ 2: { shoot: f % 9 === 0 && f < 30, face: 1 }, 0: { mx: 1, special: me.state === 'stun' && me.t > 0.1 } }), () => {
       down ||= me.state === 'down';
       escaped ||= me.state === 'spin';
       return false;
@@ -386,7 +386,7 @@ describe('mechanics', () => {
   it('pressing the action button at point-blank range grabs instead of punching', () => {
     const { game, me, d1 } = scene();
     me.x = 700; me.z = 180; d1.x = 674; d1.z = 180; d1.facing = 1;
-    run(game, 6, (f) => ({ 2: { action: f === 0, grab: true } }));
+    run(game, 6, (f) => ({ 2: { shoot: f === 0, grab: true } }));
     expect(d1.state).toBe('grab');
     expect(me.state).toBe('held');
   });
@@ -411,7 +411,7 @@ describe('mechanics', () => {
     run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
     const x0 = me.x;
     let knees = 0, top = 0, down = false;
-    run(game, 150, (f) => ({ 2: { action: f % 14 === 0 } }), () => {
+    run(game, 150, (f) => ({ 2: { shoot: f % 14 === 0 } }), () => {
       for (const e of game.drainEvents()) if (e.type === 'hit' && e.power === 2) knees++;
       if (me.state === 'down') { down = true; top = Math.max(top, me.y); }
       return false;
@@ -429,7 +429,7 @@ describe('mechanics', () => {
     run(game, 30, () => ({ 2: { mx: 1, grab: true } }));
     expect(me.state).toBe('held');
     const gx = d1.x;
-    run(game, 90, (f) => ({ 2: { mx: -1, action: f === 2 } }));
+    run(game, 90, (f) => ({ 2: { mx: -1, shoot: f === 2 } }));
     expect(me.x).toBeLessThan(gx - 40);
   });
 
@@ -493,7 +493,7 @@ describe('mechanics', () => {
     const x0 = me.x;
     let knees = 0, liftTop = 0, spun = 0, slam3 = false, hurl = false, downFrames = 0, lastRot = 0, fumbled = false;
     // The press waits out the clinch (the victim's window to break free), then throws at once.
-    run(game, 200, (f) => ({ 2: { mx: f < 30 ? 1 : 0, action: f === 20 } }), () => {
+    run(game, 200, (f) => ({ 2: { mx: f < 30 ? 1 : 0, shoot: f === 20 } }), () => {
       for (const e of game.drainEvents()) {
         if (e.type === 'hit') knees++;
         if (e.type === 'hurl') hurl = true;
@@ -549,5 +549,104 @@ describe('mechanics', () => {
     expect(game.score[0]).toBe(2);
     expect(me.pickupCd).toBeGreaterThan(0.5);
     expect(game.players[2].pickupCd).toBe(0);
+  });
+});
+
+describe('build 18: one button shoots and fights', () => {
+  it('without the ball the shoot button punches and the pass button jumps', () => {
+    const a = scene();
+    a.game.giveBall(a.d1, true);
+    run(a.game, 3, (f) => ({ 0: { shoot: f === 0 } }));
+    expect(a.me.state).toBe('punch');
+
+    const b = scene();
+    b.game.giveBall(b.d1, true);
+    let top = 0;
+    run(b.game, 30, (f) => ({ 0: { action: f === 0 } }), () => { top = Math.max(top, b.me.y); return false; });
+    expect(top).toBeGreaterThan(40);
+  });
+
+  it('off the ball on offence the shoot button still fights, and the pass button calls for the ball', () => {
+    const { game, me, mate } = scene();
+    game.giveBall(mate, true);
+    me.x = 500; me.z = 180;
+    run(game, 2, (f) => ({ 0: { action: f === 0 } }));
+    expect(game.passCall[0]).toBeGreaterThan(0);
+    expect(me.state).toBe('move');
+    run(game, 3, (f) => ({ 0: { shoot: f === 0 } }));
+    expect(me.state).toBe('punch');
+  });
+
+  it('hammering the fight button does not throw up a shot the moment the ball is won', () => {
+    const { game, me, d1 } = scene();
+    game.giveBall(d1, true);
+    me.x = 700; me.z = 180;
+    let shot = false;
+    // Mash every 8 frames; the ball arrives part way through.
+    run(game, 120, (f) => {
+      if (f === 30) { me.state = 'move'; me.t = 0; game.giveBall(me, true); }
+      return { 0: { shoot: f % 8 === 0 } };
+    }, () => { shot ||= me.state === 'shoot' || me.state === 'dunk'; return false; });
+    expect(shot).toBe(false);
+    expect(game.ball.holder).toBe(0);
+    // Leave the button alone for a moment and it shoots again.
+    run(game, 30, () => ({}));
+    run(game, 3, (f) => ({ 0: { shoot: f === 0 } }));
+    expect(me.state).toBe('shoot');
+  });
+});
+
+describe('build 18: dunks and fights with some weight', () => {
+  it('a dunker ends beside the rim, hangs below it, and clears whoever stood underneath', () => {
+    const { game, me, d1 } = scene();
+    const hx = attackHoopX(0);
+    me.x = hx - 150; me.z = HOOP.z + 6;
+    d1.x = hx - 44; d1.z = HOOP.z + 6;
+    game.startDunk(me);
+    let reeled = false;
+    run(game, 200, () => ({}), () => { reeled ||= d1.state === 'stun'; return me.state === 'hang'; });
+    expect(game.score[0]).toBe(2);
+    expect(Math.abs(hx - me.x)).toBeCloseTo(DUNK_STAND, 3);
+    expect(reeled).toBe(true);
+    run(game, 20, () => ({}));
+    expect(me.state).toBe('hang');
+    expect(me.y).toBeGreaterThan(HOOP.rimY - HANG_FEET - 1);
+    expect(me.y).toBeLessThan(HOOP.rimY - HANG_FEET + 6);
+    expect(Math.hypot(d1.x - me.x, (d1.z - me.z) * 1.4)).toBeGreaterThan(40);
+    run(game, 60, () => ({}));
+    expect(me.y).toBe(0);
+  });
+
+  it('a punch drives its victim along the line between the two bodies', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 660; d1.z = 166; d1.facing = 1;
+    let vz = 0;
+    run(game, 20, (f) => ({ 2: { shoot: f === 0, face: 1 } }), () => { if (me.state === 'stun' && vz === 0) vz = me.vz; return false; });
+    expect(vz).toBeGreaterThan(20);
+  });
+
+  it('a punch that catches someone in the middle of their own swing staggers them for longer', () => {
+    const stun = (swinging: boolean) => {
+      const { game, me, d1 } = scene();
+      game.ball.holder = null; game.ball.state = 'loose'; game.ball.x = 100; game.ball.z = 300; game.ball.y = 0;
+      me.x = 700; me.z = 180; me.facing = -1;
+      d1.x = 660; d1.z = 180; d1.facing = 1;
+      if (swinging) game.startPunch(me, 2); // a slow finisher, still winding up when the jab arrives
+      run(game, 12, (f) => ({ 2: { shoot: f === 0, face: 1 } }), () => me.state === 'stun');
+      expect(me.state).toBe('stun');
+      return me.stunFor;
+    };
+    expect(stun(true)).toBeGreaterThan(stun(false) + 0.05);
+  });
+
+  it('a stagger gives ground and stops: the victim is not frozen in place and does not slide for ever', () => {
+    const { game, me, d1 } = scene();
+    me.x = 700; me.z = 180;
+    d1.x = 660; d1.z = 180; d1.facing = 1;
+    run(game, 40, (f) => ({ 2: { shoot: f === 0, face: 1 } }));
+    expect(me.x - 700).toBeGreaterThan(12);
+    expect(me.x - 700).toBeLessThan(60);
+    expect(Math.abs(me.vx)).toBeLessThan(1);
   });
 });

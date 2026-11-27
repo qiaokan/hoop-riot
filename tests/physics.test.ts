@@ -148,7 +148,7 @@ describe('item physics', () => {
     s.game.items.push(can);
     step(s, 3);
     expect(s.game.heldItem(s.me)).toBe(can);
-    step(s, 2, (f) => ({ 0: { action: f === 0 } }));
+    step(s, 2, (f) => ({ 0: { shoot: f === 0 } }));
     expect(can.state).toBe('thrown');
     let bounces = 0;
     for (let f = 0; f < 600 && !(can.state === 'ground' && can.vx === 0 && can.y === 0); f++) {
@@ -173,7 +173,7 @@ describe('item physics', () => {
     s.game.items.push(crate);
     step(s, 3);
     s.game.drainEvents();
-    step(s, 2, (f) => ({ 0: { action: f === 0 } }));
+    step(s, 2, (f) => ({ 0: { shoot: f === 0 } }));
     let smashed = false;
     for (let f = 0; f < 200 && s.game.items.includes(crate); f++) {
       step(s, 1);

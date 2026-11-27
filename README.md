@@ -28,15 +28,16 @@ One player:
 |---|---|---|
 | Move | WASD / arrows | Left stick / D-pad |
 | Sprint | Shift | RB / RT |
-| Shoot / jump / get off a ride | J or Space: hold to jump, let go when the marker is in the green | A |
-| Pass (with ball) / punch combo (without) / use an item (holding one) / fire (on a ride) | K | X |
-| Grab | Run or walk into an opponent, or press K while touching one (not while holding the ball) | Same |
-| In a grab | K: knee strike. Left or right + K: throw that way. Up + K: throw them at the hoop | X |
-| Running tackle | Sprint + K without the ball | RB + X |
-| Air kick | K while jumping | X in the air |
+| Shoot (with the ball): hold to jump, let go when the marker is in the green | J or Space | A |
+| Fight (without the ball): punch combo / use an item / fire a ride's weapon | J or Space | A |
+| Pass (with the ball) / jump (without it) / get off a ride | K | X |
+| Grab | Run or walk into an opponent, or press J while touching one (not while holding the ball) | Same |
+| In a grab | J: knee strike. Left or right + J: throw that way. Up + J: throw them at the hoop | A |
+| Running tackle | Sprint + J without the ball | RB + A |
+| Air kick | K to jump, then J in the air | X, then A |
 | Dodge (cannot be hit) | L | B / Y |
 | Special | L when the RIOT meter is full | B / Y |
-| Call for a pass | K when your teammate has the ball | X |
+| Call for a pass | K when your teammate has the ball (near the rim it jumps for a lob instead) | X |
 | Pause · mute · music | P · M · N | Start |
 
 Two players on one keyboard:
@@ -45,8 +46,8 @@ Two players on one keyboard:
 |---|---|---|
 | Move | W A S D | Arrow keys |
 | Sprint | Left Shift | Right Shift |
-| Shoot / jump | J | , (comma) |
-| Pass / hit / throw | K | . (period) |
+| Shoot / fight / throw | J | , (comma) |
+| Pass / jump | K | . (period) |
 | Dodge / special | L | / (slash) |
 
 With one gamepad connected in a two-player mode, the gamepad goes to Player 2. With two, each player gets one.
@@ -59,18 +60,20 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 - **Play never stops for a basket.** The ball drops out of the net and is live at once, so both teams fight for it. The team that just scored has to wait about a second before touching it, which gives the other side first chance.
 - **Shooting:** a bar appears over your head during a jump shot. Let go while the marker is in the green zone and the shot is aimed dead centre, so it always drops. The zone shrinks with distance and when a defender is close or in the air.
 - **Ball physics:** outside the green zone the aim scatters, and the rim and backboard decide the rest. The ball really bounces off the ring and the board, so shots can rattle in, bank in, or bounce out for a rebound. A shot can be rebounded as soon as it has touched the rim or board.
-- **Dunks:** sprint into the paint and press shoot. A dunk always scores unless you are hit out of the air.
+- **Dunks:** sprint into the paint and press shoot. A dunk always scores unless you are hit out of the air. The dunker's hand goes to the rim and they hang from it for a moment; anyone standing underneath is barged out of the way.
 - **Alley-oop:** pass to a teammate who is jumping near the rim and they dunk it.
 
 **Fighting**
-- **Combo:** tap K three times for a jab, a cross and a finisher. Each strike has a wind-up and a recovery. A strike that lands can be cancelled into the next one; a miss has to recover fully and cannot be chained.
+- **One button shoots and fights:** with the ball J shoots; without it J fights. So that hammering J in a scrap does not throw up a shot the moment you win the ball, J will not shoot until it has been left alone for a third of a second.
+- **Hits have weight:** a blow drives its victim along the line between the two bodies, harder from a heavier attacker, a running one, or one who catches the victim in the middle of a swing of their own (a counter also staggers for longer). A staggered player stumbles back and stops instead of sliding. The reaction depends on where the blow landed: head back for a jab, folded over for a body shot, up on the toes for an uppercut. Standing players keep a body's width apart.
+- **Combo:** tap J three times for a jab to the head, a cross to the body and an uppercut. Each strike has a wind-up and a recovery. A strike that lands can be cancelled into the next one; a miss has to recover fully and cannot be chained.
 - **Hit pause:** when a strike lands, the attacker and the victim freeze on the impact frame for a moment while everyone else keeps moving.
 - The first two hits stagger and never take the ball. The third hit of a chain launches the victim, who drops the ball.
 - **Knockdowns are physical:** the body flies in an arc, can bounce once, slides, and bounces off the end fence. A flying body bowls over a teammate in its path.
 - A running tackle, an air kick or a thrown item knocks down at once. An air kick on an airborne player spikes them into the floor. A missed tackle leaves you sliding.
 - Hitting anyone who is in the air knocks them down.
-- **Grabs:** run or walk into an opponent and you grab them on contact. Pressing K while touching an opponent also grabs, instead of punching. You cannot grab while you hold the ball, and after a grab you must wait 8 seconds for the next (the HUD shows "GRAB READY"). Someone who was just grabbed cannot be grabbed again for 4 seconds. A prompt over your head shows the buttons and the time left. A grab that is not used lets go after about a second and a half. The computer only grabs when it decides to.
-- **In a grab:** for the first 0.3 seconds (the clinch) the grabber can only hold on; that is the victim's window to get out. After it, K alone knees them (up to twice; the third press throws), and left or right + K throws them that way.
+- **Grabs:** run or walk into an opponent and you grab them on contact. Pressing J while touching an opponent also grabs, instead of punching. You cannot grab while you hold the ball, and after a grab you must wait 8 seconds for the next (the HUD shows "GRAB READY"). Someone who was just grabbed cannot be grabbed again for 4 seconds. A prompt over your head shows the buttons and the time left. A grab that is not used lets go after about a second and a half. The computer only grabs when it decides to.
+- **In a grab:** for the first 0.3 seconds (the clinch) the grabber can only hold on; that is the victim's window to get out. After it, J alone knees them (up to twice; the third press throws), and left or right + J throws them that way.
 - **Throws:** the thrower hoists the victim over their head and hurls them. The victim flies spinning, lands with a heavy slam and a bounce, drops the ball, stays down longer than from a normal knockdown, and bowls over a teammate in the way.
 - **Getting out:** a dodge slips any hit and passes through defenders. Pressing dodge while being comboed breaks out for half your stamina; while held, for a fifth. Breaking a grab staggers the grabber. A held ball carrier with no stamina left can still press K to pass the ball out; the ball gets away, the body does not.
 
@@ -83,11 +86,11 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 **Hitting the ball**
 - A punch, kick or tackle that reaches a loose ball knocks it away, and swats an opponent's shot or pass. A ball that was just struck staggers the first opponent it hits, and they cannot catch it until it touches the floor.
 - **Juggles:** a body still in the air after a knockdown can be hit again, twice at most.
-- **Body dunk:** in a grab, Up + K throws the victim at the hoop you attack. A body that drops through the rim is 1 point (and counts as two dunks against the rim). Sure from close in, a gamble from further out. Any body that falls through a hoop counts, however it got there.
+- **Body dunk:** in a grab, Up + J throws the victim at the hoop you attack. A body that drops through the rim is 1 point (and counts as two dunks against the rim). Sure from close in, a gamble from further out. Any body that falls through a hoop counts, however it got there.
 
-**Items** drop onto the court. Walk over one with empty hands to pick it up, then press K.
+**Items** drop onto the court. Walk over one with empty hands to pick it up, then press J.
 
-| Item | What K does |
+| Item | What J does |
 |---|---|
 | Trash can, cone, crate | Throw it: knocks down the first opponent it hits |
 | Bomb | Throw it. The fuse lights when you pick it up (3.5 s) and it blows up on contact, on the floor, or in your hands. A blast launches everyone nearby, friend or foe, flings the ball (a flung ball can score), and sets off other bombs |
@@ -100,13 +103,13 @@ With one gamepad connected in a two-player mode, the gamepad goes to Player 2. W
 
 Swing at the right moment as a thrown item arrives and you catch it instead of being hit.
 
-**Rides:** walk into one to get on. K uses it, J gets off; it runs out after a few seconds and comes back later.
+**Rides:** walk into one to get on. Without the ball J uses its weapon; K gets off; it runs out after a few seconds and comes back later.
 
 | Ride | Court | What it does |
 |---|---|---|
-| Skateboard | Arcade Alley | Twice running speed; runs opponents over, one at a time: each ram slows it, costs a third of its life, and it cannot ram again for 3 seconds. K is a burst of speed. J with the ball goes straight into a shot or a dunk |
-| Tank | Palace Court | Slow. Punches bounce off; only heavy hits and blasts wear down its 4 armour, and then it blows up. K fires an exploding shell every 3 seconds (it spares your own side). Ramming works once every 3 seconds. Loaded with the ball, K fires the ball at the hoop (less accurate from far away) |
-| Helicopter | The Helipad | Flies over everyone. K drops a bomb. J bails out; with the ball near the rim that is a 3-point sky dunk |
+| Skateboard | Arcade Alley | Twice running speed; runs opponents over, one at a time: each ram slows it, costs a third of its life, and it cannot ram again for 3 seconds. J is a burst of speed. With the ball, J goes straight into a shot or a dunk |
+| Tank | Palace Court | Slow. Punches bounce off; only heavy hits and blasts wear down its 4 armour, and then it blows up. J fires an exploding shell every 3 seconds (it spares your own side). Ramming works once every 3 seconds. Loaded with the ball, J fires the ball at the hoop (less accurate from far away) |
+| Helicopter | The Helipad | Flies over everyone. J drops a bomb. K bails out; with the ball near the rim, J bails out into a 3-point sky dunk |
 
 **Hazards**
 

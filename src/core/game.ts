@@ -1,5 +1,5 @@
 import {
-  COURT, DT, DUNK_RANGE, DUNK_TIME, GRAVITY, HAND_Y, HOOP, JUMP_V, RUN_SPEED, SHOT_CLOCK,
+  BODY, COURT, DT, DUNK_FEET, DUNK_RANGE, DUNK_STAND, DUNK_TIME, HANG_FEET, HANG_TIME, GRAVITY, HAND_Y, HOOP, JUMP_V, RUN_SPEED, SHOT_CLOCK,
   SPRINT_MUL, THREE_PT, TeamId, attackDir, attackHoopX, ownHoopX, DEFAULT_MATCH_SECONDS,
   BALL_R, GRAB_CLINCH, GRAB_COOLDOWN, GRAB_HOLD, GRAB_IMMUNE, HIGH_MIN_Y, HIGH_RIM_Y, LAUNCH_V, PAD_RECHARGE,
 } from './constants';
@@ -48,6 +48,8 @@ export interface Player {
   pickupCd: number;
   /** The current attack (punch, tackle, air kick) has already connected. */
   punchHit: boolean;
+  /** Who this fighter's current punch landed on (-1: nobody yet). The fist is drawn on them. */
+  hitId: number;
   /** The current tackle is a Blitz special (homing, invulnerable). */
   blitz: boolean;
   /** In the air off a launch pad. */
@@ -55,8 +57,14 @@ export interface Player {
   padCd: number;
   /** Hit pause: seconds this fighter stays frozen on the frame of impact. */
   freeze: number;
-  /** Seconds a press of the action button stays buffered, so combo inputs are not dropped. */
+  /** Seconds a press of the pass button stays buffered. */
   actBuf: number;
+  /** Seconds a press of the shoot button stays buffered for fighting, so combo inputs are not dropped. */
+  atkBuf: number;
+  /** After a fight press, the shoot button will not shoot until it has been left alone this long. */
+  shootLock: number;
+  /** Where the last blow landed: 0 head, 1 body, 2 chin (an uppercut). Picks the reaction. */
+  hitZone: number;
   /** Which strike of the punch combo this is: 0 jab, 1 cross, 2 finisher. */
   combo: number;
   /** How long the current stagger lasts. */
@@ -267,7 +275,7 @@ export class Game {
           x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, facing: attackDir(team),
           state: 'move', t: 0, stamina: 1, hits: 0, hitTimer: 0, invuln: 0, pickupCd: 0,
           punchHit: false, blitz: false, launched: false, padCd: 0, anim: 0, released: false,
-          freeze: 0, actBuf: 0, combo: 0, stunFor: 0.36, bounced: false, bowled: false,
+          freeze: 0, actBuf: 0, atkBuf: 0, shootLock: 0, hitZone: 0, hitId: -1, combo: 0, stunFor: 0.36, bounced: false, bowled: false,
           grabId: -1, heldBy: -1, pushT: 0, grabCd: 0, knees: 0, kneeT: 0,
           tossDir: 1, thrown: false, rot: 0, spinRate: 0, flinch: 0, downFor: 1.1,
           rideId: -1, rideCd: 0, magnetT: 0, springT: 0, bodyDunked: false, downBy: -1, juggles: 0,
@@ -368,7 +376,7 @@ export class Game {
       p.blitz = false;
       p.launched = false;
       p.padCd = 0;
-      p.freeze = 0; p.actBuf = 0; p.combo = 0; p.bounced = false; p.bowled = false;
+      p.freeze = 0; p.actBuf = 0; p.atkBuf = 0; p.shootLock = 0; p.combo = 0; p.bounced = false; p.bowled = false;
       p.grabId = -1; p.heldBy = -1; p.pushT = 0; p.grabCd = 0; p.knees = 0; p.kneeT = 0;
       p.thrown = false; p.rot = 0; p.spinRate = 0; p.flinch = 0; p.downFor = 1.1;
       p.rideId = -1; p.rideCd = 0; p.juggles = 0; p.bodyDunked = false; p.weapon = null; p.tossHoop = false;
@@ -391,7 +399,7 @@ export class Game {
 
   giveBall(p: Player, silent = false) {
     this.dropItem(p);
-    p.actBuf = 0; // a buffered punch must not turn into an instant pass
+    p.actBuf = 0; p.atkBuf = 0; // a buffered press must not turn into an instant pass
     const b = this.ball;
     const changed = b.lastTeam !== p.team || b.afterShot;
     b.state = 'held';
@@ -490,11 +498,21 @@ export class Game {
   private updatePlayer(p: Player, intent: Intent, raw: Intent) {
     const pressedShoot = intent.shoot && !p.prev.shoot;
     const pressedSpecial = intent.special && !p.prev.special;
-    // The action button is buffered for a moment so presses during a hit pause or a recovery
-    // still count. takeAction() consumes the buffered press.
+    // Presses are buffered for a moment so one made during a hit pause or a recovery still
+    // counts. The shoot button fights when the player has no ball (takeFight); the pass button
+    // passes, calls for the ball or jumps (takeAction). Each consumes its buffered press.
     if (intent.action && !p.prev.action) p.actBuf = 0.18;
     else p.actBuf = Math.max(0, p.actBuf - DT);
+    if (pressedShoot) p.atkBuf = 0.18;
+    else p.atkBuf = Math.max(0, p.atkBuf - DT);
     const takeAction = () => { if (p.actBuf <= 0) return false; p.actBuf = 0; return true; };
+    const takeFight = () => { if (p.atkBuf <= 0) return false; p.atkBuf = 0; return true; };
+    // Hammering the button in a fight must not fire off a shot the moment the ball is won: the
+    // shoot button only shoots once it has been left alone for a third of a second.
+    const hadLock = p.shootLock > 0;
+    p.shootLock = Math.max(0, p.shootLock - DT);
+    if (pressedShoot && (this.ball.holder !== p.id || hadLock)) p.shootLock = 0.34;
+    const shootNow = pressedShoot && !hadLock;
     p.prev.shoot = raw.shoot;
     p.prev.action = raw.action;
     p.prev.special = raw.special;
@@ -542,8 +560,11 @@ export class Game {
         }
         break;
       }
-      case 'stun':
-        p.vx *= 0.88; p.vz *= 0.88;
+      case 'stun': {
+        // Reeling: the feet give ground at a steady rate, like any body sliding to a stop.
+        const sv = Math.hypot(p.vx, p.vz), sdec = (this.slip ? 200 : 600) * DT;
+        if (sv <= sdec) p.vx = p.vz = 0;
+        else { p.vx *= (sv - sdec) / sv; p.vz *= (sv - sdec) / sv; }
         // Break out of a combo with a dodge, at a heavy stamina cost.
         if (pressedSpecial && p.t > 0.06 && p.stamina >= 0.5 && !airborne) {
           p.stamina -= 0.25;
@@ -556,6 +577,7 @@ export class Game {
           p.state = airborne ? 'jump' : 'move'; p.t = 0; p.hits = 0; p.invuln = Math.max(p.invuln, 0.35);
         }
         break;
+      }
       case 'punch': {
         // Combo: jab, cross, finisher. Each strike has start-up, active and recovery frames.
         // A strike that lands can be cancelled into the next one; a miss has to recover fully.
@@ -564,8 +586,8 @@ export class Game {
         const fin = p.combo >= 2;
         const start = bat ? 0.1 : fin ? 0.09 : 0.05, end = bat ? 0.2 : fin ? 0.19 : 0.13, total = bat ? 0.5 : fin ? 0.44 : 0.27;
         p.vx *= 0.85; p.vz *= 0.85;
-        if (!p.punchHit && p.t > start && p.t < end) this.checkHit(p, bat ? 72 : fin ? 54 : 48, bat ? 28 : 24, bat ? 'bat' : fin ? 'finisher' : 'jab');
-        if (p.punchHit && !fin && p.t > end && takeAction()) this.startPunch(p, p.combo + 1);
+        if (!p.punchHit && p.t > start && p.t < end) this.checkHit(p, bat ? 80 : fin ? 62 : 58, bat ? 28 : 24, bat ? 'bat' : fin ? 'finisher' : 'jab');
+        if (p.punchHit && !fin && p.t > end && takeFight()) this.startPunch(p, p.combo + 1);
         else if (p.t > total) { p.state = 'move'; p.t = 0; p.combo = 0; p.weapon = null; }
         break;
       }
@@ -582,7 +604,7 @@ export class Game {
         break;
       case 'ride':
         p.stamina = clamp(p.stamina + 0.2 * DT, 0, 1);
-        this.toys.drive(p, intent, pressedShoot, takeAction);
+        this.toys.drive(p, intent, shootNow, takeFight, takeAction);
         if (p.state === 'ride') return; // the ride drives the position
         break;
       case 'beam':
@@ -591,7 +613,7 @@ export class Game {
         const active = p.t < (p.blitz ? 0.45 : 0.3) && !p.punchHit;
         if (active) {
           if (p.blitz && this.homeBlitz(p)) break;
-          this.checkHit(p, 42, 28, 'tackle');
+          this.checkHit(p, 48, 28, 'tackle');
           if (p.punchHit) { p.vx *= 0.3; p.vz *= 0.3; }
         } else {
           p.vx *= 0.86; p.vz *= 0.86;
@@ -607,13 +629,13 @@ export class Game {
         if (p.t > 0.28) { p.state = 'move'; p.t = 0; }
         break;
       case 'grab': {
-        // Holding an opponent, arcade style: action alone knees them (twice, then it throws);
-        // a direction plus action throws them that way at once.
+        // Holding an opponent, arcade style: the fight button alone knees them (twice, then it
+        // throws); a direction plus the button throws them that way at once.
         const o = p.grabId >= 0 ? this.players[p.grabId] : null;
         p.vx *= 0.7; p.vz *= 0.7;
         p.kneeT = Math.max(0, p.kneeT - DT);
         if (!o || o.state !== 'held' || o.heldBy !== p.id) { p.state = 'move'; p.t = 0; p.grabId = -1; break; }
-        if (p.t >= GRAB_CLINCH && takeAction()) {
+        if (p.t >= GRAB_CLINCH && takeFight()) {
           const way = intent.mx * p.facing;
           // Up + action aims the throw at the hoop: a body through the rim is a point.
           if (intent.mz < -0.5 && Math.abs(intent.mx) < 0.5) this.startToss(p, Math.sign(attackHoopX(p.team) - p.x) || p.facing, true);
@@ -668,7 +690,14 @@ export class Game {
         return; // dunk drives its own position
       case 'hang':
         p.vx = p.vz = 0;
-        if (p.t <= 0.32) { p.vy = 0; return; }
+        if (p.t <= HANG_TIME) {
+          // The body swings down under the rim and hangs from it at arm's length.
+          const hangY = Math.max(0, (p.dunk ? p.dunk.rimY : HOOP.rimY) - HANG_FEET);
+          p.y += (hangY - p.y) * Math.min(1, 13 * DT);
+          p.vy = 0;
+          this.clearUnder(p, false);
+          return;
+        }
         p.state = 'jump'; p.t = 0; p.vy = -50;
         break;
       case 'shoot':
@@ -676,13 +705,13 @@ export class Game {
         if (hasBall && !p.released && !intent.shoot) this.releaseShot(p, false);
         break;
       case 'jump':
-        if (hasBall && p.launched && !p.released && pressedShoot) {
+        if (hasBall && p.launched && !p.released && shootNow) {
           // Off a launch pad: dunk if the rim is close, otherwise hold for an air shot.
           if (distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200) this.startSkyDunk(p);
           else p.state = 'shoot';
-        } else if (!hasBall && this.heldItem(p) && takeAction()) {
+        } else if (!hasBall && this.heldItem(p) && takeFight()) {
           this.toys.useItem(p, this.heldItem(p)!);
-        } else if (!hasBall && p.y > 8 && takeAction()) {
+        } else if (!hasBall && p.y > 8 && takeFight()) {
           p.state = 'airkick'; p.t = 0; p.punchHit = false;
           if (intent.face) p.facing = intent.face;
           else if (Math.abs(intent.mx) > 0.15) p.facing = intent.mx > 0 ? 1 : -1;
@@ -710,7 +739,7 @@ export class Game {
             if (!full) this.startSpin(p, mx, mz);
             else if (p.def.special === 'slam') this.megaSlam(p);
             else this.specialShot(p);
-          } else if (pressedShoot) {
+          } else if (shootNow) {
             const hx = attackHoopX(p.team);
             const d = distXZ(p.x, p.z, hx, HOOP.z);
             const towardHoop = Math.sign(hx - p.x) === Math.sign(p.vx) || d < 70;
@@ -725,22 +754,23 @@ export class Game {
             if (!full) this.startSpin(p, mx, mz);
             else if (p.def.defSpecial === 'blitz') this.startBlitz(p);
             else this.shockwave(p);
-          } else if (pressedShoot) {
-            if (!this.boost(p)) {
-              p.state = 'jump'; p.t = 0; this.jump(p);
-              // Jumping near the rim while a teammate has the ball asks for a lob.
-              const lob = mateHasBall && distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200;
-              this.emit('jump', p.x, 0, p.z, { player: p.id, text: lob ? 'LOB!' : undefined });
-            }
-          } else if (takeAction()) {
+          } else if (takeFight()) {
+            // Without the ball the shoot button fights: an item if one is held, a grab at
+            // point-blank range, a tackle at a sprint, otherwise a punch.
             const it = this.heldItem(p);
-            // At point-blank range the action button grabs instead of punching.
             const close = intent.grab && !it ? this.grabTarget(p, mx, mz, false) : null;
             if (it) this.toys.useItem(p, it);
-            else if (mateHasBall) this.passCall[p.team] = 0.8;
             else if (close) this.startGrab(p, close);
             else if (sprinting) this.startTackle(p, mx, mz);
             else this.startPunch(p, 0);
+          } else if (takeAction()) {
+            // The pass button asks for the ball, or jumps: for a lob near the rim, a block or a rebound.
+            const lob = mateHasBall && distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 200;
+            if (mateHasBall && !lob) this.passCall[p.team] = 0.8;
+            else if (!this.boost(p)) {
+              p.state = 'jump'; p.t = 0; this.jump(p);
+              this.emit('jump', p.x, 0, p.z, { player: p.id, text: lob ? 'LOB!' : undefined });
+            }
           }
         }
         // Running or walking into an opponent with your hands free grabs them almost at once.
@@ -804,7 +834,7 @@ export class Game {
         if (Math.abs(a.y - b.y) > 50) continue;
         const dx = b.x - a.x, dz = (b.z - a.z) * 1.4;
         const d = Math.hypot(dx, dz);
-        const min = 22;
+        const min = BODY;
         if (d > 0.001 && d < min) {
           // Two bodies in the same spot push apart, the lighter one giving more ground.
           const ma = massOf(a.def), mb = massOf(b.def);
@@ -924,7 +954,7 @@ export class Game {
     p.t = 0;
     p.facing = dir;
     p.invuln = T + 0.3;
-    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * 12, tz: HOOP.z + 4, T, kind: 'mega', rimY: HIGH_RIM_Y };
+    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * DUNK_STAND, tz: HOOP.z + 4, T, kind: 'mega', rimY: HIGH_RIM_Y };
     this.stats[p.team].fga++;
     this.hitstop = 0.12;
     this.emit('megaslam', p.x, p.y + 60, p.z, { player: p.id, team: p.team, text: 'MEGA SLAM!' });
@@ -1018,7 +1048,7 @@ export class Game {
     p.state = 'dunk';
     p.t = 0;
     p.facing = dir;
-    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * 12, tz: HOOP.z + 4, T: DUNK_TIME, kind: 'dunk', rimY: HOOP.rimY };
+    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * DUNK_STAND, tz: HOOP.z + 4, T: DUNK_TIME, kind: 'dunk', rimY: HOOP.rimY };
     this.stats[p.team].fga++;
     this.emit('jump', p.x, 0, p.z, { player: p.id, text: 'DUNK!' });
   }
@@ -1029,8 +1059,33 @@ export class Game {
     p.state = 'dunk';
     p.t = 0;
     p.facing = dir;
-    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * 12, tz: HOOP.z + 4, T: 0.36, kind: 'oop', rimY: HOOP.rimY };
+    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * DUNK_STAND, tz: HOOP.z + 4, T: 0.36, kind: 'oop', rimY: HOOP.rimY };
     this.stats[p.team].fga++;
+  }
+
+  /**
+   * A dunker comes down through the space under the rim, and nobody else can be standing in it:
+   * everyone on the floor there is moved out, and opponents are barged aside (they reel).
+   */
+  private clearUnder(p: Player, barge: boolean) {
+    const R = BODY + 12;
+    for (const o of this.players) {
+      if (o.id === p.id || o.y > 40) continue;
+      if (o.state === 'down' || o.state === 'held' || o.state === 'ride' || o.state === 'beam' || o.state === 'dunk' || o.state === 'hang') continue;
+      let dx = o.x - p.x, dz = (o.z - p.z) * 1.4;
+      const dd = Math.hypot(dx, dz);
+      if (dd >= R) continue;
+      // Out the way they already are; from dead centre, back up the court.
+      if (dd < 2) { dx = -p.facing; dz = 0; } else { dx /= dd; dz /= dd; }
+      const push = Math.min(R - dd, 7);
+      o.x = clamp(o.x + dx * push, COURT.minX, COURT.maxX);
+      o.z = clamp(o.z + (dz * push) / 1.4, COURT.minZ, COURT.maxZ);
+      if (barge && o.team !== p.team && o.invuln <= 0 && (o.state === 'move' || o.state === 'punch' || o.state === 'pass')) {
+        o.state = 'stun'; o.t = 0; o.stunFor = 0.4; o.hitZone = 1; o.combo = 0;
+        o.vx = dx * 170; o.vz = (dz * 170) / 1.4;
+        this.emit('hit', o.x, 60, o.z, { player: o.id, team: p.team, power: 1 });
+      }
+    }
   }
 
   /** A dunk always goes in unless the dunker is hit out of the air first. */
@@ -1039,7 +1094,7 @@ export class Game {
     const u = Math.min(1, p.t / d.T);
     const e = u * u * (3 - 2 * u);
     const prevY = p.y;
-    const top = d.rimY - 80;
+    const top = d.rimY - DUNK_FEET;
     const arc = d.kind === 'mega' ? 120 : 70 * Math.max(0, 1 - d.sy / 90);
     p.x = d.sx + (d.tx - d.sx) * e;
     p.z = d.sz + (d.tz - d.sz) * e;
@@ -1053,6 +1108,7 @@ export class Game {
         if (distXZ(p.x, p.z, o.x, o.z) < 44 && o.y < p.y + 80) this.knockDown(o, p.facing, p.team, 320, 380, 'megaslam');
       }
     }
+    if (u > 0.7) this.clearUnder(p, d.kind !== 'mega');
     if (u < 1) return;
     const b = this.ball;
     if (b.holder !== p.id) { p.state = 'jump'; p.t = 0; p.vy = 0; return; }
@@ -1124,7 +1180,7 @@ export class Game {
     const h = this.holder();
     if (h && h.team !== p.team) return false; // not while defending: blocks need a normal jump
     if (mate.state !== 'move' || mate.y !== 0 || Math.hypot(mate.vx, mate.vz) > 60) return false;
-    if (Math.hypot(mate.x - p.x, (mate.z - p.z) * 1.4) > 32) return false;
+    if (Math.hypot(mate.x - p.x, (mate.z - p.z) * 1.4) > BODY + 10) return false;
     p.state = 'jump'; p.t = 0; p.vy = LAUNCH_V; p.launched = true; p.released = false;
     mate.state = 'pass'; mate.t = 0; mate.facing = p.x >= mate.x ? 1 : -1;
     this.emit('boost', p.x, 20, p.z, { player: p.id, text: 'BOOST!' });
@@ -1135,10 +1191,11 @@ export class Game {
     p.state = 'punch';
     p.t = 0;
     p.punchHit = false;
+    p.hitId = -1;
     p.combo = combo;
     p.weapon = weapon;
     // Each strike steps in a little further than the last, so the string stays in range.
-    p.vx += p.facing * [90, 140, 170][combo];
+    p.vx += p.facing * [120, 200, 230][combo];
     this.emit('swing', p.x + p.facing * 20, p.y + 46, p.z, { player: p.id, power: combo >= 2 ? 2 : 1 });
   }
 
@@ -1187,6 +1244,18 @@ export class Game {
     const need = Math.max(1, (o.def.tough ?? 3) - (a.def.heavyHands ? 1 : 0));
     const ko = heavyMove || o.hits >= need || o.state === 'dunk' || o.y > 12;
     const cx = (a.x + o.x) / 2 + a.facing * 6;
+    // The blow travels along the line between the two bodies, not only along the court.
+    let nx = o.x - a.x, nz = o.z - a.z;
+    const nl = Math.hypot(nx, nz);
+    if (nl < 4 || nx * a.facing <= 0) { nx = a.facing; nz = 0; } else { nx /= nl; nz /= nl; }
+    // What it carries: the attacker's weight, how fast the two were closing (for a punch), and
+    // more again if the victim was caught in the middle of a swing of their own.
+    const punch = kind === 'jab' || kind === 'finisher';
+    const closing = punch ? clamp(((a.vx - o.vx) * nx + (a.vz - o.vz) * nz) / 600, 0, 0.5) : 0;
+    const counter = o.state === 'punch' || o.state === 'tackle' || o.state === 'airkick';
+    const carry = clamp(Math.sqrt(massOf(a.def)) * (1 + closing) * (counter ? 1.2 : 1), 0.8, 1.6);
+    a.hitId = o.id;
+    o.hitZone = kind === 'finisher' ? 2 : kind === 'tackle' || (kind === 'jab' && a.combo === 1) ? 1 : 0;
     if (ko) {
       a.freeze = 0.13;
       let force = 250 + 110 * a.def.power, lift = 380;
@@ -1194,7 +1263,9 @@ export class Game {
       else if (kind === 'tackle') { force = 330; lift = 220; }
       else if (kind === 'airkick') { force = 300; lift = o.y > 30 ? -380 : 340; }
       else if (kind === 'bat') { force = 520; lift = 430; }
-      this.knockDown(o, a.facing, a.team, force, lift, o.hits < need && !heavyMove ? 'aircatch' : kind);
+      this.knockDown(o, a.facing, a.team, force * carry, lift, o.hits < need && !heavyMove ? 'aircatch' : kind);
+      const sp = Math.abs(o.vx);
+      o.vx = nx * sp; o.vz = nz * sp * 0.75;
       o.downBy = a.id;
       o.freeze = 0.13;
     } else {
@@ -1203,9 +1274,10 @@ export class Game {
       o.freeze = big ? 0.11 : 0.07;
       o.state = 'stun';
       o.t = 0;
-      o.stunFor = big ? 0.5 : 0.36;
-      o.vx = (a.facing * (big ? 240 : 95 + 40 * a.def.power)) / Math.sqrt(massOf(o.def));
-      this.emit('hit', cx, o.y + 48, o.z, { player: o.id, team: a.team, power: big ? 2 : 1 });
+      o.stunFor = (big ? 0.5 : 0.36) + (counter ? 0.08 : 0);
+      const v = Math.min(big ? 300 : 215, ((big ? 250 : 140 + 40 * a.def.power) * carry) / Math.sqrt(massOf(o.def)));
+      o.vx = nx * v; o.vz = nz * v * 0.75;
+      this.emit('hit', cx, o.y + 48, o.z, { player: o.id, team: a.team, power: big || counter ? 2 : 1 });
     }
   }
 
@@ -1250,9 +1322,9 @@ export class Game {
     for (const o of this.opponents(p)) {
       if (o.y !== 0 || o.invuln > 0 || o.grabCd > 0) continue;
       if (o.state !== 'move' && o.state !== 'stun' && o.state !== 'pass' && o.state !== 'punch') continue;
-      // Bodies keep about 22 apart, so anything inside 34 is touching.
+      // Bodies keep BODY apart, so anything a little inside that is touching.
       const ox = o.x - p.x, oz = o.z - p.z;
-      if (Math.hypot(ox, oz * 1.4) > 34) continue;
+      if (Math.hypot(ox, oz * 1.4) > BODY + 6) continue;
       if (m >= 0.3) {
         if ((mx * ox + mz * oz) / (m * (Math.hypot(ox, oz) || 1)) < (pushing ? 0.3 : 0)) continue;
       } else if (ox * p.facing < 0) continue;
@@ -1414,7 +1486,7 @@ export class Game {
     p.state = 'dunk';
     p.t = 0;
     p.facing = dir;
-    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * 12, tz: HOOP.z + 4, T: 0.4, kind: high ? 'sky' : 'dunk', rimY: high ? HIGH_RIM_Y : HOOP.rimY };
+    p.dunk = { sx: p.x, sy: p.y, sz: p.z, tx: hx - dir * DUNK_STAND, tz: HOOP.z + 4, T: 0.4, kind: high ? 'sky' : 'dunk', rimY: high ? HIGH_RIM_Y : HOOP.rimY };
     this.stats[p.team].fga++;
     this.emit('jump', p.x, p.y, p.z, { player: p.id, text: high ? 'SKY DUNK!' : 'DUNK!' });
   }

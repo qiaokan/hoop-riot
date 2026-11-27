@@ -28,6 +28,14 @@ export const SPRINT_MUL = 1.45;
 export const THREE_PT = 340;
 export const DUNK_RANGE = 165;
 export const DUNK_TIME = 0.55;
+/** A dunker ends up this far in front of the rim's middle, so the head is beside the hoop and not inside it. */
+export const DUNK_STAND = 38;
+/** Feet below the rim at the slam, and while hanging from it at arm's length. */
+export const DUNK_FEET = 80;
+export const HANG_FEET = 114;
+export const HANG_TIME = 0.42;
+/** How close two standing bodies can get. */
+export const BODY = 32;
 export const SHOT_CLOCK = 15;
 export const DEFAULT_MATCH_SECONDS = 180;
 export const HAND_Y = 36;

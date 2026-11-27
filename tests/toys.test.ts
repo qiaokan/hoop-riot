@@ -52,7 +52,7 @@ describe('items', () => {
     const bomb = give(s, s.me, 'bomb');
     expect(bomb.kind).toBe('bomb');
     expect(bomb.fuse).toBeGreaterThan(3);
-    run(s, 90, (f) => ({ 0: { action: f === 0, face: 1 } }), () => s.d1.state === 'down');
+    run(s, 90, (f) => ({ 0: { shoot: f === 0, face: 1 } }), () => s.d1.state === 'down');
     expect(s.seen).toContain('boom');
     expect(s.d1.state).toBe('down');
     expect(s.d1.y + Math.abs(s.d1.vy)).toBeGreaterThan(0); // launched, not just tipped over
@@ -86,7 +86,7 @@ describe('items', () => {
     const s = scene();
     s.d1.x = 750; s.d1.z = 180;
     give(s, s.me, 'bat');
-    run(s, 30, (f) => ({ 0: { action: f === 0, face: 1 } }), () => s.d1.state === 'down');
+    run(s, 30, (f) => ({ 0: { shoot: f === 0, face: 1 } }), () => s.d1.state === 'down');
     expect(s.d1.state).toBe('down');
     expect(s.d1.vx).toBeGreaterThan(400);
     expect(s.d1.downBy).toBe(0);
@@ -95,7 +95,7 @@ describe('items', () => {
   it('a bat breaks after three swings', () => {
     const s = scene();
     give(s, s.me, 'bat');
-    for (let i = 0; i < 3; i++) run(s, 40, (f) => ({ 0: { action: f === 0 } }));
+    for (let i = 0; i < 3; i++) run(s, 40, (f) => ({ 0: { shoot: f === 0 } }));
     expect(s.game.heldItem(s.me)).toBeNull();
   });
 
@@ -106,7 +106,7 @@ describe('items', () => {
       s.mate.state = 'down'; s.mate.t = -99; // keep the teammate out of it
       give(s, s.me, 'bat');
       looseBall(s, 750, 30, 180);
-      run(s, 240, (f) => ({ 0: { action: f === 0, face: 1 } }), () => s.game.score[0] > 0);
+      run(s, 240, (f) => ({ 0: { shoot: f === 0, face: 1 } }), () => s.game.score[0] > 0);
       if (s.seen.includes('crack')) drives++;
       if (s.game.score[0] > 0) { scored++; expect(s.game.score[0]).toBe(3); }
     }
@@ -118,7 +118,7 @@ describe('items', () => {
   it('a thrown banana lies in wait and sends a runner sliding', () => {
     const s = scene();
     give(s, s.me, 'banana');
-    run(s, 80, (f) => ({ 0: { action: f === 0, face: 1 } }));
+    run(s, 80, (f) => ({ 0: { shoot: f === 0, face: 1 } }));
     const peel = s.game.items[0];
     expect(peel.armed).toBe(true);
     s.d1.x = peel.x + 70; s.d1.z = peel.z;
@@ -133,7 +133,7 @@ describe('items', () => {
     s.d1.x = 770; s.d1.z = 180; s.d2.x = 620; s.d2.z = 200;
     looseBall(s, 760, 5, 240);
     give(s, s.me, 'hammer');
-    run(s, 30, (f) => ({ 0: { action: f === 0 } }), () => s.d1.state === 'down' && s.d2.state === 'down');
+    run(s, 30, (f) => ({ 0: { shoot: f === 0 } }), () => s.d1.state === 'down' && s.d2.state === 'down');
     expect(s.d1.state).toBe('down');
     expect(s.d2.state).toBe('down');
     expect(s.game.ball.y).toBeGreaterThan(5);
@@ -143,7 +143,7 @@ describe('items', () => {
     const s = scene();
     s.d1.x = 800; s.d1.z = 180;
     give(s, s.me, 'ext');
-    run(s, 60, (f) => ({ 0: { action: f === 0, face: 1 } }));
+    run(s, 60, (f) => ({ 0: { shoot: f === 0, face: 1 } }));
     expect(s.d1.x).toBeGreaterThan(900);
     expect(s.d1.state).not.toBe('down'); // shoved, not hurt
     expect(s.seen).toContain('spray');
@@ -164,7 +164,7 @@ describe('items', () => {
       if (shoes) s.game.items.push(s.game.toys.makeItem('shoes', s.me.x, 0, s.me.z));
       run(s, 2);
       let top = 0;
-      run(s, 90, (f) => ({ 0: { shoot: f === 0 } }), () => { top = Math.max(top, s.me.y); return false; });
+      run(s, 90, (f) => ({ 0: { action: f === 0 } }), () => { top = Math.max(top, s.me.y); return false; });
       return top;
     };
     expect(peak(true)).toBeGreaterThan(peak(false) * 1.7);
@@ -175,7 +175,7 @@ describe('items', () => {
       const s = scene();
       s.d1.x = 1000; s.d1.z = 180; s.d1.facing = -1;
       give(s, s.d1, 'crate');
-      run(s, 60, (f) => ({ 2: { action: f === 0, face: -1 }, 0: { action: f === press, face: 1 } }));
+      run(s, 60, (f) => ({ 2: { shoot: f === 0, face: -1 }, 0: { shoot: f === press, face: 1 } }));
       return { caught: s.texts.includes('CAUGHT!'), holding: s.game.heldItem(s.me)?.kind, down: s.seen.includes('ko') };
     };
     const results = Array.from({ length: 30 }, (_, f) => attempt(f));
@@ -192,7 +192,7 @@ describe('new mechanics', () => {
     const s = scene();
     looseBall(s, 730, 30, 180);
     s.d1.x = 840; s.d1.z = 180;
-    run(s, 40, (f) => ({ 0: { action: f === 0, face: 1 } }), () => s.d1.state === 'stun');
+    run(s, 40, (f) => ({ 0: { shoot: f === 0, face: 1 } }), () => s.d1.state === 'stun');
     expect(s.d1.state).toBe('stun');
     expect(s.game.ball.vx).toBeLessThan(0); // came back off them
   });
@@ -207,7 +207,7 @@ describe('new mechanics', () => {
       const falling = s.me.state === 'move' && s.d1.state === 'down' && s.d1.vy < 0 && s.d1.y > 25 && s.d1.y < 80;
       const press: boolean = (f === 3 || (f > 10 && falling)) && !last;
       last = press;
-      run(s, 1, () => ({ 0: { action: press, face: 1 } }));
+      run(s, 1, () => ({ 0: { shoot: press, face: 1 } }));
       s.me.x = s.d1.x - 30; // stay under them
       if (s.d1.state !== 'down') break;
     }
@@ -223,7 +223,7 @@ describe('new mechanics', () => {
     s.d1.x = 1276; s.d1.z = 180;
     run(s, 20, () => ({ 0: { mx: 1, grab: true } }), () => s.me.state === 'grab');
     expect(s.me.state).toBe('grab');
-    run(s, 120, (f) => ({ 0: { mz: -1, action: f === 20 } }), () => s.game.score[0] > 0);
+    run(s, 120, (f) => ({ 0: { mz: -1, shoot: f === 20 } }), () => s.game.score[0] > 0);
     expect(s.texts).toContain('BODY DUNK! +1');
     expect(s.game.score).toEqual([1, 0]);
     expect(s.game.lastScorer).toBe(0);
@@ -236,7 +236,7 @@ describe('new mechanics', () => {
       s.me.x = 1000; s.me.z = 180;
       s.d1.x = 1026; s.d1.z = 180;
       run(s, 20, () => ({ 0: { mx: 1, grab: true } }), () => s.me.state === 'grab');
-      run(s, 150, (f) => ({ 0: { mz: -1, action: f === 20 } }), () => s.game.score[0] > 0);
+      run(s, 150, (f) => ({ 0: { mz: -1, shoot: f === 20 } }), () => s.game.score[0] > 0);
       made += s.game.score[0];
     }
     expect(made).toBeGreaterThan(1);
@@ -363,7 +363,7 @@ describe('events', () => {
       if (low) s.game.toys.startEvent('lowgrav');
       run(s, 1);
       let top = 0;
-      run(s, 200, (f) => ({ 0: { shoot: f === 0 } }), () => { top = Math.max(top, s.me.y); return false; });
+      run(s, 200, (f) => ({ 0: { action: f === 0 } }), () => { top = Math.max(top, s.me.y); return false; });
       return { top, s };
     };
     const low = peak(true);
@@ -466,7 +466,7 @@ describe('rides', () => {
     run(s, 120, () => ({ 0: { mx: 1 } }), () => { top = Math.max(top, s.me.vx); return s.d1.state === 'down'; });
     expect(top).toBeGreaterThan(300);
     expect(s.d1.state).toBe('down');
-    run(s, 2, (f) => ({ 0: { shoot: f === 0 } }));
+    run(s, 2, (f) => ({ 0: { action: f === 0 } }));
     expect(s.me.state).toBe('jump');
     expect(r.rider).toBeNull();
   });
@@ -502,7 +502,7 @@ describe('rides', () => {
     expect(s.me.state).toBe('ride');
     s.game.giveBall(s.mate, true);
     s.d1.x = s.me.x + 40; s.d1.z = 180; s.d1.facing = -1;
-    run(s, 30, (f) => ({ 2: { action: f === 0, face: -1 } }));
+    run(s, 30, (f) => ({ 2: { shoot: f === 0, face: -1 } }));
     expect(s.me.state).toBe('ride');
     expect(s.seen).toContain('clang');
     expect(r.hp).toBe(4);
@@ -517,12 +517,12 @@ describe('rides', () => {
   it('a tank fires shells that explode, and fires the ball at the hoop when loaded with it', () => {
     const { s } = withRide('tank');
     s.d1.x = 1050; s.d1.z = 180;
-    run(s, 60, (f) => ({ 0: { action: f === 0, mx: 0.2 } }), () => s.d1.state === 'down');
+    run(s, 60, (f) => ({ 0: { shoot: f === 0, mx: 0.2 } }), () => s.d1.state === 'down');
     expect(s.d1.state).toBe('down');
     expect(s.seen).toContain('boom');
     run(s, 190);
     s.game.giveBall(s.me, true);
-    run(s, 3, (f) => ({ 0: { action: f === 0, mx: 0.2 } }));
+    run(s, 3, (f) => ({ 0: { shoot: f === 0, mx: 0.2 } }));
     expect(s.texts).toContain('CANNON SHOT!');
     expect(s.game.ball.state).toBe('shot');
     expect(s.game.ball.vx).toBeGreaterThan(0);
@@ -533,7 +533,7 @@ describe('rides', () => {
     run(s, 60);
     expect(s.me.y).toBeGreaterThan(140);
     s.d1.x = r.x; s.d1.z = r.z;
-    run(s, 120, (f) => ({ 0: { action: f === 0 } }), () => s.d1.state === 'down');
+    run(s, 120, (f) => ({ 0: { shoot: f === 0 } }), () => s.d1.state === 'down');
     expect(s.d1.state).toBe('down');
     expect(s.me.state).toBe('ride'); // too high for its own blast
   });

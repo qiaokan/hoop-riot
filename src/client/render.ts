@@ -511,6 +511,7 @@ export class Renderer {
           dt, ballH: b.y - p.y, gazeX: b.x - p.x, gazeY: b.y - (p.y + 70), carrying: !!game.heldItem(p),
           ride: toys.rideOf(p)?.kind ?? null,
           tilt: p.state === 'ride' && toys.rideOf(p) ? rideTilt(toys.rideOf(p)!) : undefined,
+          strike: p.state === 'punch' && p.hitId >= 0 ? strikeAt(p, game.players[p.hitId]) : undefined,
         }),
       });
     }
@@ -632,7 +633,7 @@ export class Renderer {
       if (h.state !== 'grab' && h.state !== 'held') continue;
       const x = h.x - camX + (h.state === 'grab' ? h.facing * 12 : 0), y = sy(h.z, 0) - 172;
       const lines = h.state === 'grab'
-        ? [h.knees < 2 ? `${hv.action}: knee (${h.knees}/2)` : `${hv.action}: THROW!`, `LEFT / RIGHT + ${hv.action}: THROW`, `UP + ${hv.action}: AT THE HOOP`]
+        ? [h.knees < 2 ? `${hv.shoot}: knee (${h.knees}/2)` : `${hv.shoot}: THROW!`, `LEFT / RIGHT + ${hv.shoot}: THROW`, `UP + ${hv.shoot}: AT THE HOOP`]
         : game.ball.holder === h.id ? [`${hv.dodge}: break free`, `${hv.action}: pass out`] : [`${hv.dodge}: break free`];
       ctx.textAlign = 'center';
       ctx.font = 'bold 13px "Trebuchet MS", sans-serif';
@@ -657,13 +658,13 @@ export class Renderer {
       let line = '';
       if (r) {
         const has = b.holder === h.id;
-        line = r.kind === 'tank' ? `${hv.action}: ${has ? 'FIRE THE BALL' : 'FIRE'} · ${hv.shoot}: ${has ? 'shoot' : 'get out'}`
-          : r.kind === 'heli' ? `${hv.action}: BOMB · ${hv.shoot}: ${has ? 'SKY DUNK' : 'bail out'}`
-            : `${hv.action}: BOOST · ${hv.shoot}: ${has ? 'shoot / dunk' : 'jump off'}`;
+        line = r.kind === 'tank' ? `${hv.shoot}: ${has ? 'FIRE THE BALL' : 'FIRE'} · ${hv.action}: get out`
+          : r.kind === 'heli' ? `${hv.shoot}: ${has ? 'SKY DUNK' : 'BOMB'} · ${hv.action}: bail out`
+            : `${hv.shoot}: ${has ? 'shoot / dunk' : 'BOOST'} · ${hv.action}: jump off`;
       } else if (it && h.state === 'move') {
         const verb = it.kind === 'bat' ? `SWING (${it.uses})` : it.kind === 'hammer' ? `SLAM (${it.uses})` : it.kind === 'ext' ? `SPRAY (${it.uses})`
           : it.kind === 'bomb' ? `THROW IT! ${Math.max(0, it.fuse).toFixed(1)}` : 'THROW';
-        line = `${hv.action}: ${verb}`;
+        line = `${hv.shoot}: ${verb}`;
       }
       if (!line) continue;
       const x = h.x - camX, y = sy(h.z, h.y) - (r ? 168 : 150);
@@ -1081,4 +1082,13 @@ export class Renderer {
     }
     ctx.restore();
   }
+}
+
+/**
+ * Where a punch that landed should be drawn landing: on the surface of the victim, at the head,
+ * the body or the chin. In pixels forward of and above the attacker's feet.
+ */
+function strikeAt(p: Player, o: Player): { x: number; y: number } {
+  const h = o.hitZone === 1 ? 50 : o.hitZone === 2 ? 72 : 84;
+  return { x: (o.x - p.x) * p.facing - 13, y: o.y - p.y + h - (o.z - p.z) * 0.7 };
 }

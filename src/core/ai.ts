@@ -116,7 +116,7 @@ export class AIController {
       if (p.state === 'grab') {
         if (b.grabSeen !== p.grabId) { b.grabSeen = p.grabId; b.hoopToss = this.rng() < 0.3 + P.combo * 0.6; }
         if (b.hoopToss && distXZ(p.x, p.z, attackHoopX(p.team), HOOP.z) < 300) out.mz = -1;
-        out.action = p.t > 0.22 && Math.floor(now * 7) % 2 === 0;
+        out.shoot = p.t > 0.22 && Math.floor(now * 7) % 2 === 0;
         return out;
       }
       b.grabSeen = -1;
@@ -139,7 +139,7 @@ export class AIController {
       // Landed a punch: decide once per strike whether to throw the next one.
       if (p.state === 'punch' && p.punchHit && p.combo < 2) {
         if (b.comboSeen !== p.combo) { b.comboSeen = p.combo; b.comboGo = this.rng() < P.combo; }
-        if (b.comboGo && p.t > 0.11) { out.action = true; return out; }
+        if (b.comboGo && p.t > 0.11) { out.shoot = true; return out; }
       } else if (p.state !== 'punch') b.comboSeen = -1;
       // Being hit again and again: sometimes burn stamina to dodge out of the chain.
       if (p.state === 'stun' && p.hits >= 2 && p.stamina >= 0.5 && this.rng() < P.dodge * 0.05) {
@@ -164,7 +164,7 @@ export class AIController {
       const carried = !has && p.state === 'move' ? g.heldItem(p) : null;
       if (carried) {
         const face = this.itemUse(p, carried);
-        if (face) { out.action = true; out.face = face; return out; }
+        if (face) { out.shoot = true; out.face = face; return out; }
       }
       // Teammate is in the air at the rim: throw the lob.
       const mate = g.teammate(p);
@@ -179,7 +179,7 @@ export class AIController {
           if (o.state !== 'dunk' && o.state !== 'shoot') continue;
           const dx = o.x - p.x;
           if (Math.abs(dx) < 50 && Math.abs(o.z - p.z) < 24 && Math.abs(o.y - p.y) < 55 && this.rng() < P.aggression * 0.1) {
-            out.action = true;
+            out.shoot = true;
             out.face = dx >= 0 ? 1 : -1;
             return out;
           }
@@ -199,20 +199,21 @@ export class AIController {
       out.mx = dx / d;
       out.mz = dz / d;
       out.sprint = true;
-      out.action = true;
+      out.shoot = true;
       return out;
     }
     if (b.action) {
       b.action = false;
       const isPunch = g.ball.holder !== p.id && !(g.holder()?.team === p.team);
       if (!isPunch || now - b.lastPunch > 0.9 - P.aggression * 0.6) {
-        out.action = true;
+        // The shoot button fights; the pass button passes.
+        if (isPunch) out.shoot = true; else out.action = true;
         out.face = b.face;
         if (isPunch) b.lastPunch = now;
       }
     }
     if (b.special) { out.special = true; b.special = false; }
-    if (b.jump) { out.shoot = true; b.jump = false; }
+    if (b.jump) { out.action = true; b.jump = false; } // without the ball, the pass button jumps
     if (b.startShot) {
       out.shoot = true;
       b.startShot = false;
@@ -330,7 +331,7 @@ export class AIController {
         go(hx - dir * 60, HOOP.z);
         if (dHoop < 170 && p.y > HIGH_MIN_Y) out.shoot = true; // bail out into a sky dunk
       } else if (r.kind === 'tank') {
-        if (dHoop < 460) { out.mx = dir * 0.2; if (r.facing === dir) out.action = pulse; } // fire the ball
+        if (dHoop < 460) { out.mx = dir * 0.2; if (r.facing === dir) out.shoot = pulse; } // fire the ball
         else go(hx - dir * 380, HOOP.z);
       } else {
         go(hx - dir * 100, HOOP.z);
@@ -343,19 +344,19 @@ export class AIController {
     if (!holder) {
       // Nobody has the ball: go to it. It cannot be reached from the air, so jump out near it.
       const d = go(ball.x, ball.z, 4);
-      if (r.kind === 'heli' && ball.state === 'loose' && d < 150) out.shoot = true;
+      if (r.kind === 'heli' && ball.state === 'loose' && d < 150) out.action = true;
       return;
     }
     const target = holder.team !== p.team ? holder : this.nearestOpp(p).o;
     if (!target) return;
     if (r.kind === 'heli') {
       const d = go(target.x + target.vx * 0.5, target.z + target.vz * 0.5, 6);
-      if (d < 34 && target.y < 40) out.action = pulse; // bombs away
+      if (d < 34 && target.y < 40) out.shoot = pulse; // bombs away
     } else if (r.kind === 'tank') {
       const dx = target.x - p.x, dz = target.z - p.z;
       if (Math.abs(dz) > 14) out.mz = Math.sign(dz);
       out.mx = Math.sign(dx) * (Math.abs(dx) > 420 ? 1 : 0.2);
-      if (Math.abs(dz) < 22 && Math.abs(dx) < 520 && Math.abs(dx) > 50 && r.facing === Math.sign(dx)) out.action = pulse;
+      if (Math.abs(dz) < 22 && Math.abs(dx) < 520 && Math.abs(dx) > 50 && r.facing === Math.sign(dx)) out.shoot = pulse;
     } else go(target.x, target.z, 0); // skateboard: run them over
   }
 
@@ -584,9 +585,9 @@ export class AIController {
       b.tz = holder.z + (vz / vl) * 34;
       b.sprint = myD > 90 && p.stamina > 0.3;
       // Sometimes go for a grab: walk straight into the ball carrier.
-      if (g.time >= b.grabUntil && myD < 75 && holder.state === 'move' && p.grabCd <= 0 && this.rng() < P.grab) b.grabUntil = g.time + 0.8;
+      if (g.time >= b.grabUntil && myD < 75 && holder.state === 'move' && p.grabCd <= 0 && this.rng() < P.grab * 0.6) b.grabUntil = g.time + 0.8;
       if (g.time < b.grabUntil) { b.tx = holder.x; b.tz = holder.z; b.sprint = false; return; }
-      const inReach = myD < 48 && Math.abs(holder.z - p.z) < 22;
+      const inReach = myD < 56 && Math.abs(holder.z - p.z) < 22;
       if (holder.state === 'dunk' && myD < 90 && this.rng() < P.aggression + 0.2) {
         b.face = holder.x > p.x ? 1 : -1; b.action = true;
       } else if (holder.state === 'shoot' && myD < 75 && this.rng() < P.blockSkill) {

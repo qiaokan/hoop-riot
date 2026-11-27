@@ -35,7 +35,7 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 17 · redrawn rides, car, dogs and saucer';
+const VERSION = 'build 18 · fight on the shoot button, longer arms, real dunks';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -344,11 +344,11 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
   if (!twoP) {
     const lines = [
       ['MOVE', 'WASD / Arrows', 'SPRINT', 'Shift'],
-      ['SHOOT / JUMP', 'J or Space: hold, let go in the green', 'PASS / PUNCH', 'K (tap 3 times: combo)'],
-      ['TACKLE', 'Sprint + K (no ball)', 'AIR KICK', 'K in the air'],
+      ['SHOOT', 'J or Space: hold, let go in the green', 'PUNCH (no ball)', 'J (tap 3 times: combo)'],
+      ['PASS / JUMP', 'K: pass with the ball, jump without', 'TACKLE', 'Sprint + J (no ball)'],
       ['DODGE', 'L (can\'t be hit)', 'SPECIAL', 'L (RIOT full)'],
-      ['CALL FOR PASS', 'K when your teammate has the ball', 'USE ITEM', 'K (walk over it first)'],
-      ['GRAB', 'Run into an opponent, or K when touching', 'IN A GRAB', 'K knee · dir + K throw · up + K hoop'],
+      ['CALL FOR PASS', 'K when your teammate has the ball', 'USE ITEM', 'J (walk over it first)'],
+      ['GRAB', 'Run into an opponent, or J when touching', 'IN A GRAB', 'J knee · dir + J throw · up + J hoop'],
     ];
     lines.forEach((l, i) => {
       const yy = y + 24 + i * 22.5;
@@ -357,7 +357,7 @@ function drawControls(ctx: CanvasRenderingContext2D, y: number, twoP: boolean) {
       text(ctx, l[2], cx + 100, yy, `bold 13px ${FONT}`, '#ffe14a', 'left');
       text(ctx, l[3], cx + 215, yy, `13px ${FONT}`, '#ffffff', 'left');
     });
-    text(ctx, 'P pause · M mute · N music · Gamepad: stick, A shoot, X pass / hit, B dodge / special, RB sprint',
+    text(ctx, 'P pause · M mute · N music · Gamepad: stick, A shoot / hit, X pass / jump, B dodge / special, RB sprint',
       cx, y + 164, `12px ${FONT}`, '#cfd3e6', 'center', 3);
   } else {
     const rows = [
@@ -408,12 +408,12 @@ function drawPause(ctx: CanvasRenderingContext2D) {
   text(ctx, 'Enter / P: resume  ·  Esc: quit to title', VIEW_W / 2, 156, `bold 16px ${FONT}`, '#ffffff', 'center', 4);
   drawControls(ctx, 172, !solo);
   const tips = [
-    'Tap K three times: jab, cross, then a finisher that launches them and frees the ball. A miss cannot be chained.',
-    'Run into an opponent to grab them. K knees; left or right + K throws; UP + K throws them at the hoop (in = 1 point).',
+    'Without the ball, J fights. Tap it three times: jab, body shot, then an uppercut that launches them and frees the ball.',
+    'Run into an opponent to grab them. J knees; left or right + J throws; UP + J throws them at the hoop (in = 1 point).',
     'Caught in a combo or a grab? Press L to break out (costs stamina); no stamina, K passes the ball out. After a grab, wait 8 seconds.',
     'Yellow pads launch you: shoot near the rim for a 3-point sky dunk. Shots from high up go in the gold hoop for +1.',
-    'Items: K swings the bat (bat a loose ball at the hoop!), slams the hammer, sprays, or throws. Get rid of a lit bomb.',
-    'Walk into a skateboard, tank or helicopter to ride it: K fires or boosts, J gets off. Punch a loose ball to send it flying.',
+    'Items: J swings the bat (bat a loose ball at the hoop!), slams the hammer, sprays, or throws. Get rid of a lit bomb.',
+    'Walk into a skateboard, tank or helicopter to ride it: J fires or boosts, K gets off. K in the air, then J: air kick. Punch a loose ball to send it flying.',
   ];
   tips.forEach((tip, i) => text(ctx, tip, VIEW_W / 2, 386 + i * 18, `13px ${FONT}`, '#cfd3e6', 'center', 3));
 }

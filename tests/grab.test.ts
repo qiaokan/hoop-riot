@@ -25,8 +25,8 @@ export function defenderGrabs(seed: number, oppIndex: number, sprint: boolean, s
     const intents = game.players.map((p): Intent => {
       // Holding someone: knee, knee, throw.
       if (p.id === 0 && me.state === 'grab') return throwNow
-        ? { mx: me.facing, mz: 0, sprint: false, shoot: false, action: steps % 6 < 3, special: false, grab: true }
-        : { mx: 0, mz: 0, sprint: false, shoot: false, action: steps % 12 < 3, special: false, grab: true };
+        ? { mx: me.facing, mz: 0, sprint: false, shoot: steps % 6 < 3, action: false, special: false, grab: true }
+        : { mx: 0, mz: 0, sprint: false, shoot: steps % 12 < 3, action: false, special: false, grab: true };
       if (p.id !== 0 || !h || h.team === 0) return ai.intent(p);
       defenseFrames++;
       const dx = h.x - me.x, dz = h.z - me.z, d = Math.hypot(dx, dz) || 1;
@@ -130,7 +130,7 @@ describe('grabs are strong but answerable', () => {
     expect(s.me.state).toBe('grab');
     // Mashing throw from the first frame: nothing happens until the clinch is over.
     let frames = 0;
-    while (s.me.state === 'grab' && frames < 60) { s.step({ 0: { mx: 1, action: frames % 2 === 0 } }); frames++; }
+    while (s.me.state === 'grab' && frames < 60) { s.step({ 0: { mx: 1, shoot: frames % 2 === 0 } }); frames++; }
     expect(s.me.state).toBe('toss');
     expect(frames / 60).toBeGreaterThanOrEqual(GRAB_CLINCH - 0.02);
 
@@ -139,7 +139,7 @@ describe('grabs are strong but answerable', () => {
     f = 0;
     while (t.me.state !== 'grab' && f++ < 40) t.step({ 0: { mx: 1, grab: true } });
     // The victim reacts a fifth of a second in, while the grabber mashes throw.
-    for (let i = 0; i < 30; i++) t.step({ 0: { mx: 1, action: i % 2 === 0 }, 2: { special: i === 12 } });
+    for (let i = 0; i < 30; i++) t.step({ 0: { mx: 1, shoot: i % 2 === 0 }, 2: { special: i === 12 } });
     expect(t.d1.state).not.toBe('down');
     expect(t.d1.state).not.toBe('held');
     expect(t.me.grabCd).toBeGreaterThan(GRAB_COOLDOWN - 1);
