@@ -33,9 +33,11 @@ export interface PlayerLook {
   tilt?: { a: number; py: number };
   /** A punch that landed: where the fist meets the victim, in pixels forward of and above the feet. */
   strike?: { x: number; y: number };
+  /** Drawn as a solid body that really turns around, so it needs no squash to sell the flip. */
+  solid?: boolean;
 }
 
-interface Pose {
+export interface Pose {
   /** Hip height above the ground and sideways shift. */
   hipH: number; hipX: number;
   /** Front and back foot: x offset and height of the sole above the ground. */
@@ -206,9 +208,9 @@ export function shade(c: string, k: number): string {
  * sprinters are long in the leg, strong players broad in the shoulder and thick in the limb,
  * heavy ones thick through the middle and a little stooped.
  */
-interface Figure { leg: number; chest: number; waist: number; belly: number; limb: number; hunch: number; head: number }
+export interface Figure { leg: number; chest: number; waist: number; belly: number; limb: number; hunch: number; head: number }
 const figures = new Map<PlayerDef, Figure>();
-function figureOf(d: PlayerDef): Figure {
+export function figureOf(d: PlayerDef): Figure {
   let f = figures.get(d);
   if (!f) {
     const heavy = clamp01((d.build - 1) * 4 + (d.power - 0.7) * 1.2);
@@ -231,9 +233,9 @@ function figureOf(d: PlayerDef): Figure {
 /** Values for the figure being drawn right now, shared by the drawing helpers. */
 const cur = { hair: 0, cloth: 0, flare: 0 };
 
-type Hand = 'fist' | 'open' | 'grip' | 'point';
+export type Hand = 'fist' | 'open' | 'grip' | 'point';
 /** What each hand (front, back) is doing in this move. */
-function handsFor(p: Player, look: PlayerLook): [Hand, Hand] {
+export function handsFor(p: Player, look: PlayerLook): [Hand, Hand] {
   switch (p.state) {
     case 'punch': return p.weapon === 'bat' ? ['grip', 'grip'] : ['fist', 'fist'];
     case 'tackle': case 'pound': case 'spray': case 'airkick': return ['fist', 'fist'];
@@ -686,7 +688,7 @@ function drawHand(ctx: CanvasRenderingContext2D, x: number, y: number, dir: numb
 }
 
 /** Length of each half of an arm. Arms stretch when raised, cartoon-style, so the hands clear the oversized head. */
-function armLen(ang: number) {
+export function armLen(ang: number) {
   return ARM * (1 + 0.42 * clamp01((ang - 1.7) / 0.8) + 0.4 * clamp01((ang - 2.7) / 0.4));
 }
 
@@ -854,7 +856,26 @@ function body(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, P: Pose, 
 
 let flashCv: HTMLCanvasElement | null = null;
 
-export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, sx: number, time: number, look: PlayerLook) {
+/** The pose a player is drawn in this frame, after easing, springs, limp limbs and squash. */
+export interface Posed {
+  P: Pose;
+  /** How far the whole figure is turned on screen (clockwise), about its middle. */
+  turn: number;
+  /** Facing, as a horizontal scale: 1 or -1, or in between during a whirl. */
+  flip: number;
+  /** 0 standing to 1 lying flat on the floor. */
+  lying: number;
+  /** Seconds left of the white flash after being hit. */
+  hitT: number;
+  /** How far hair and cloth trail behind the motion, and how far hems fly up in a fall. */
+  hair: number; cloth: number; flare: number;
+}
+
+/**
+ * Steps one player's animation by a frame and returns the pose to draw. Call it once a frame per
+ * player: it carries the springs and the limp-limb state from one frame to the next.
+ */
+export function poseFor(p: Player, look: PlayerLook, time: number): Posed & { a: Anim } {
   let a = anims.get(p.id);
   if (!a) {
     a = { pose: targetPose(p, look, time).pose, ready: false, wasAir: false, landT: 0, lastState: p.state, hitT: 0, lastFacing: p.facing, turnT: 0, vel: {}, rag: null, pvx: p.vx, pvy: p.vy, sway: 0, swayV: 0, cloth: 0, clothV: 0, hair: 0, hairV: 0, flare: 0, ghosts: [], tick: 0 };
@@ -942,7 +963,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   }
 
   // Turning around: a quick squash through the middle so the flip reads as a turn.
-  if (a.turnT > 0) P.sx *= 1 - 0.55 * Math.sin((a.turnT / 0.1) * Math.PI);
+  if (a.turnT > 0 && !look.solid) P.sx *= 1 - 0.55 * Math.sin((a.turnT / 0.1) * Math.PI);
 
   let flip: number = p.facing;
   if (p.state === 'spin') {
@@ -952,6 +973,12 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamD
   }
   // A body lying flat rests on the floor, not at standing height: lower the turning point as it tips over.
   const lying = Math.sin(turn) * Math.sin(turn) * clamp01(1 - p.y / 36);
+  return { a, P, turn, flip, lying, hitT: a.hitT, hair: a.hair, cloth: a.cloth, flare: Math.max(0, a.flare) };
+}
+
+export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, team: TeamDef, sx: number, time: number, look: PlayerLook) {
+  const { a, P, turn, flip, lying } = poseFor(p, look, time);
+  const dt = Math.min(look.dt, 1 / 30);
   const footY = sy(p.z, p.y) - P.hop + (PIVOT - 12) * S * lying;
   // Hit pause: the one who got hit shakes on the spot.
   if (p.freeze > 0 && (p.state === 'stun' || p.state === 'down')) sx += Math.sin(time * 95 + p.id) * 2.8;

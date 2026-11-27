@@ -10,7 +10,7 @@ import { drawBat, drawBumper, drawHammer, drawItem, drawWrecker } from './toyspr
 import { drawCar, drawDog, drawRideBack, drawRideFront, drawShell, drawUfo, rideTilt, stepRide } from './vehicles';
 import { FLOOR_TOP, LAYER_RES, VIEW_H, VIEW_W, ZS, sy } from './view';
 
-interface Particle {
+export interface Particle {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   life: number; max: number;
@@ -25,10 +25,38 @@ interface Banner { text: string; sub?: string; life: number; max: number; color:
 /** A player a person is controlling, and the tag drawn over their head. */
 export interface HumanView { pid: number; label: string; color: string; /** Key names to show in prompts. */ action: string; dodge: string; shoot: string }
 
+/** Where a point of the world lands on the 960 x 540 view. */
+export type Project = (x: number, y: number, z: number) => [number, number];
+
+/** What the renderer's own effects ask of whoever draws the world. */
+export interface StageFx {
+  particles: readonly Particle[];
+  trail: readonly { x: number; y: number; z: number }[];
+  shake: number;
+  /** 1, or a little more while the camera pushes in on `focus`. */
+  zoom: number;
+  focus: { x: number; y: number; z: number };
+}
+
+/**
+ * Something else that draws the world (the 3D view). With a stage set, this class draws only what
+ * lies flat over the picture: prompts, pop-up words, weather, the scoreboard and the banners.
+ */
+export interface Stage {
+  setCourt(court: CourtId): void;
+  reset(): void;
+  onEvent(e: GameEvent, game: Game): void;
+  draw(game: Game, dt: number, humans: HumanView[], fx: StageFx): void;
+  project: Project;
+}
+
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   private backdrops = new Map<CourtId, Backdrop>();
-  private bg: Backdrop;
+  private bg: Backdrop | null = null;
+  private court: CourtId = 'rooftop';
+  stage: Stage | null = null;
+  private focus = { x: 0, y: 0, z: 0 };
   camX = 0;
   private shake = 0;
   private particles: Particle[] = [];
@@ -52,7 +80,6 @@ export class Renderer {
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
-    this.bg = this.backdrop('rooftop');
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -64,7 +91,9 @@ export class Renderer {
   }
 
   setCourt(court: CourtId) {
-    this.bg = this.backdrop(court);
+    this.court = court;
+    this.bg = null;
+    this.stage?.setCourt(court);
   }
 
   resize() {
@@ -87,6 +116,7 @@ export class Renderer {
     this.zoomT = 0;
     this.slowT = 0;
     this.trail = [];
+    this.stage?.reset();
   }
 
   showBanner(text: string, color = '#ffe14a', sub?: string, life = 1.4) {
@@ -99,6 +129,7 @@ export class Renderer {
   }
 
   private drama(e: { x: number; y: number; z: number }, zoomFor: number, slowFor: number) {
+    this.focus = { x: e.x, y: e.y, z: e.z };
     this.fx = Math.max(VIEW_W * 0.25, Math.min(VIEW_W * 0.75, e.x - this.camX));
     this.fy = Math.max(150, Math.min(380, sy(e.z, e.y)));
     this.zoomT = Math.max(this.zoomT, zoomFor);
@@ -108,6 +139,7 @@ export class Renderer {
   // ------------------------------------------------------------ events → FX
 
   onEvent(e: GameEvent, game: Game) {
+    this.stage?.onEvent(e, game);
     const teamColor = (t?: TeamId) => (t === undefined ? '#ffffff' : game.teams[t].trim);
     const net = (high: boolean) => (e.x < COURT.midX ? 0 : 2) + (high ? 1 : 0);
     const high = e.y > (HOOP.rimY + HIGH_RIM_Y) / 2;
@@ -440,6 +472,8 @@ export class Renderer {
     this.updateFx(game, dt);
 
     ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    if (this.stage) { this.renderOver(game, dt, humans, opts); return; }
+    const bg = (this.bg ??= this.backdrop(this.court));
     let ox = 0, oy = 0;
     if (this.shake > 0) {
       ox = (this.rnd() - 0.5) * this.shake;
@@ -455,10 +489,10 @@ export class Renderer {
     const camX = this.camX;
 
     // Backdrop layers.
-    ctx.drawImage(this.bg.sky, 0, 0, VIEW_W, FLOOR_TOP);
-    this.drawLayer(this.bg.far, camX * FAR_PARALLAX, this.bg.farW);
-    this.drawLayer(this.bg.near, camX * NEAR_PARALLAX, this.bg.nearW);
-    ctx.drawImage(this.bg.court, camX * LAYER_RES, 0, VIEW_W * LAYER_RES, VIEW_H * LAYER_RES, 0, 0, VIEW_W, VIEW_H);
+    ctx.drawImage(bg.sky, 0, 0, VIEW_W, FLOOR_TOP);
+    this.drawLayer(bg.far, camX * FAR_PARALLAX, bg.farW);
+    this.drawLayer(bg.near, camX * NEAR_PARALLAX, bg.nearW);
+    ctx.drawImage(bg.court, camX * LAYER_RES, 0, VIEW_W * LAYER_RES, VIEW_H * LAYER_RES, 0, 0, VIEW_W, VIEW_H);
 
     // Launch pads sit on the floor.
     game.stage.launchers.forEach((pad, i) => {
@@ -587,10 +621,42 @@ export class Renderer {
       drawHoopFront(ctx, hx, camX, HOOP.rimY, this.nets[side], game.time, broken(hx, false));
     }
 
+    this.drawTags(game, humans, (x, y, z) => [x - camX, sy(z, y)]);
+    this.drawParticles(camX);
+    this.drawPopups((x, y, z) => [x - camX, sy(z, y)]);
+    ctx.restore();
+
+    this.finish(game, humans, opts);
+  }
+
+  /** Everything drawn over the finished world when a stage draws it: the same tags, words and scoreboard as in 2D. */
+  private renderOver(game: Game, dt: number, humans: HumanView[], opts: { hud: boolean; dim?: number }) {
+    const ctx = this.ctx, st = this.stage!;
+    ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    st.draw(game, dt, humans, { particles: this.particles, trail: this.trail, shake: this.shake, zoom: this.zoom, focus: this.focus });
+    const at: Project = (x, y, z) => st.project(x, y, z);
+    this.drawTags(game, humans, at);
+    // Who controls whom.
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 11px "Trebuchet MS", sans-serif';
+    for (const hv of humans) {
+      const p = game.players[hv.pid];
+      if (p.state === 'down') continue;
+      const [x, y] = at(p.x, p.y + 146, p.z);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(10,6,24,0.9)';
+      ctx.strokeText(hv.label, x, y); ctx.fillStyle = hv.color; ctx.fillText(hv.label, x, y);
+    }
+    this.drawPopups(at);
+    this.finish(game, humans, opts);
+  }
+
+  /** Tags that follow the players: worn power-ups, a ride's fuel, the shot timing bar, and what the buttons do right now. */
+  private drawTags(game: Game, humans: HumanView[], at: Project) {
+    const ctx = this.ctx, time = game.time, toys = game.toys, b = game.ball;
     // Worn power-ups show over the head; a ridden vehicle shows how much longer it lasts.
     for (const p of game.players) {
       if (p.state === 'down') continue;
-      const px = p.x - camX, py = sy(p.z, p.y) - 118;
+      const [px, py] = at(p.x, p.y + 118, p.z);
       let ix = px + 18;
       if (p.magnetT > 0 && (p.magnetT > 2 || Math.floor(time * 8) % 2)) { drawItem(ctx, 'magnet', ix, py, 0); ix += 20; }
       if (p.springT > 0 && (p.springT > 2 || Math.floor(time * 8) % 2)) drawItem(ctx, 'shoes', ix, py, 0);
@@ -614,7 +680,7 @@ export class Renderer {
       const W = game.shotWindow(h);
       const off = Math.abs(h.vy) / game.grav;
       const pos = Math.max(0, Math.min(1, h.vy > 0 ? 0.5 * (1 - off / tA) : 0.5 * (1 + off / tA)));
-      const bw = 70, bx = h.x - camX - bw / 2, by = sy(h.z, h.y) - 166;
+      const bw = 70, [cx, by] = at(h.x, h.y + 166, h.z), bx = cx - bw / 2;
       const zone = Math.max(2, (W / tA) * bw);
       const inZone = off <= W;
       ctx.fillStyle = 'rgba(12,8,28,0.9)';
@@ -631,7 +697,7 @@ export class Renderer {
     for (const hv of humans) {
       const h = game.players[hv.pid];
       if (h.state !== 'grab' && h.state !== 'held') continue;
-      const x = h.x - camX + (h.state === 'grab' ? h.facing * 12 : 0), y = sy(h.z, 0) - 172;
+      const [x, y] = at(h.x + (h.state === 'grab' ? h.facing * 12 : 0), 172, h.z);
       const lines = h.state === 'grab'
         ? [h.knees < 2 ? `${hv.shoot}: knee (${h.knees}/2)` : `${hv.shoot}: THROW!`, `LEFT / RIGHT + ${hv.shoot}: THROW`, `UP + ${hv.shoot}: AT THE HOOP`]
         : game.ball.holder === h.id ? [`${hv.dodge}: break free`, `${hv.action}: pass out`] : [`${hv.dodge}: break free`];
@@ -667,7 +733,7 @@ export class Renderer {
         line = `${hv.shoot}: ${verb}`;
       }
       if (!line) continue;
-      const x = h.x - camX, y = sy(h.z, h.y) - (r ? 168 : 150);
+      const [x, y] = at(h.x, h.y + (r ? 168 : 150), h.z);
       ctx.textAlign = 'center';
       ctx.font = 'bold 12px "Trebuchet MS", sans-serif';
       const w = ctx.measureText(line).width + 14;
@@ -677,10 +743,11 @@ export class Renderer {
       ctx.fillText(line, x, y);
     }
 
-    this.drawParticles(camX);
-    this.drawPopups(camX);
-    ctx.restore();
+  }
 
+  /** Weather, flashes, the dimming behind menus, the scoreboard and the banner: all in screen space. */
+  private finish(game: Game, humans: HumanView[], opts: { hud: boolean; dim?: number }) {
+    const ctx = this.ctx;
     this.drawWeather(game);
 
     if (this.flash > 0) {
@@ -936,13 +1003,13 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawPopups(camX: number) {
+  private drawPopups(at: Project) {
     const ctx = this.ctx;
     ctx.textAlign = 'center';
     for (const p of this.popups) {
       ctx.globalAlpha = Math.min(1, p.life * 2);
       ctx.font = `italic 900 ${p.size}px "Trebuchet MS", sans-serif`;
-      const x = p.x - camX, y = sy(p.z, p.y);
+      const [x, y] = at(p.x, p.y, p.z);
       ctx.lineWidth = 4;
       ctx.strokeStyle = 'rgba(10,6,24,0.9)';
       ctx.strokeText(p.text, x, y);

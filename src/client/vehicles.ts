@@ -53,7 +53,7 @@ const RIDE_SCALE: Record<RideKind, number> = { board: 1.3, tank: 1.45, heli: 1.5
 /** Height above the floor point (in the ride's own units) that it pitches about. */
 const PIVOT: Record<RideKind, number> = { board: 4, tank: 6, heli: 30 };
 
-interface RideAnim {
+export interface RideAnim {
   /** Pitch (positive = nose down) on a spring. */
   pitch: number; pitchV: number;
   /** 1 right after the weapon fires, fading to 0. */
@@ -73,6 +73,11 @@ function animOf(r: Ride): RideAnim {
     rideAnims.set(r, a);
   }
   return a;
+}
+
+/** A ride's drawn-only motion (pitch, recoil, wheels, rotor), as `stepRide` last left it. */
+export function rideAnim(r: Ride): RideAnim {
+  return animOf(r);
 }
 
 /** Advance a ride's drawn-only motion. Call once a frame, before drawing it or its rider. */

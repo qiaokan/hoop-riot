@@ -4,7 +4,7 @@ import { Game } from './core/game';
 import { COURTS, CourtId, HOME_TEAM, OPPONENTS, UPGRADES, Upgrade, applyUpgrades } from './core/teams';
 import { Sfx } from './client/audio';
 import { Input } from './client/input';
-import { Renderer } from './client/render';
+import { Renderer, Stage } from './client/render';
 import { roundRect } from './client/sprites';
 import { VIEW_W } from './client/view';
 
@@ -35,10 +35,13 @@ const SPEED = Math.max(0.25, Math.min(8, Number(params.get('speed') ?? 1) || 1))
 const LENGTHS = [120, 180, 300];
 const P1_COLOR = '#ffe14a', P2_COLOR = '#5ff0ff';
 /** Shown on the title screen so it is obvious which build is running. Bump it with each change. */
-const VERSION = 'build 18 · fight on the shoot button, longer arms, real dunks';
+const VERSION = 'build 19 · the whole game also runs in 3D (gl.html)';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
+// The 3D page puts a factory here before this module runs; the 2D page never loads that code.
+const makeStage = (globalThis as { __hoopStage?: (overlay: HTMLCanvasElement) => Stage }).__hoopStage;
+if (makeStage) renderer.stage = makeStage(canvas);
 const input = new Input();
 const sfx = new Sfx();
 if (params.get('mute') === '1') sfx.toggleMute();
@@ -235,13 +238,16 @@ function handleMenu() {
 
 let last = performance.now();
 let acc = 0;
+/** Dev only: stop the match where it is, so a moment can be looked at. */
+let hold = false;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   input.poll();
   handleMenu();
 
-  if (scene === 'match' || scene === 'title') {
+  if (hold) acc = 0;
+  else if (scene === 'match' || scene === 'title') {
     acc += dt * SPEED * (scene === 'match' ? renderer.timeScale() : 1);
     let n = 0;
     while (acc >= DT && n < 40) { stepSim(); acc -= DT; n++; }
@@ -540,4 +546,6 @@ function drawChampion(ctx: CanvasRenderingContext2D, t: number) {
   /** Jump to a scene (for automated screenshots). */
   show(s: Scene) { if (s === 'upgrade') openUpgrades(); else scene = s; },
   finish: onMatchOver,
+  /** Freeze or release the match (the picture keeps drawing). */
+  hold(on = true) { hold = on; },
 };

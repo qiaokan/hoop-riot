@@ -7,7 +7,7 @@ A 2-on-2 street-basketball brawler that runs in the browser. Fighting is legal: 
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm run build      # dist/hoop-riot.html — one self-contained file, open it directly
+npm run build      # dist/hoop-riot.html (2D) and dist/hoop-riot-3d.html (3D): each one self-contained file, open it directly
 npm test           # headless simulation and mechanics tests
 ```
 
@@ -191,6 +191,19 @@ Everything on the court is stepped by the same fixed-step simulation, and each r
 - `tests/physics.test.ts`: ball spin and friction, rolling, body mass and tumbling, loose items.
 - `tests/grab.test.ts`: what a person chasing the ball carrier gets out of grabs, and the ways out of one.
 - `scripts/`: programmatic Vite build/dev (no config file) and an inliner that produces the single-file build.
+
+## 3D version
+
+`gl.html` (dev server: `http://localhost:5173/gl.html`, build: `dist/hoop-riot-3d.html`) is the same game drawn in 3D: all four modes, all five courts, every item, vehicle, hazard and court event, with the same menus, scoreboard, prompts and sound.
+
+- **No asset files.** Every model, texture and shader is made in code when a court loads. three.js is the only library, and only this page carries it: the 2D file stays under 200 KB, the 3D file is about 850 KB.
+- **One game, two pictures.** `src/main3d.ts` loads `src/gl/install.ts` and then the normal `src/main.ts`. The 2D `Renderer` has a `stage` hook: with a stage set it stops drawing the world and draws only what lies flat over it (pop-up words, prompts, the shot timing bar, weather, scoreboard, banners, menus) on a transparent canvas stacked over the 3D one. Effects are still decided in one place (`Renderer.onEvent`); the stage draws the same particle list as solid, glowing shards.
+- **Players** (`src/gl/puppet.ts`) are toy figures posed by the same pose function as the 2D sprites (`poseFor` in `src/client/character.ts`), so easing, springs, limp limbs and squash carry over. Bodies really turn to face where they run, shoot and hit.
+- **Courts** (`src/gl/world.ts`) each have their own light and backdrop: golden hour on the rooftop, a pier at dusk with cranes and containers, a neon alley at night, a pad above the clouds at noon, a purple and gold palace forecourt.
+- **Props** (`src/gl/props.ts`): launch pads, the ten items, skateboard, tank, helicopter, the car and the dogs, the wrecking ball, bumpers, shells and the saucer.
+- **Lens** (`src/gl/post.ts`): ambient occlusion, bloom, a colour grade and a vignette. `src/gl/stage.ts` holds the camera, which follows play, drops under the hoop for a dunk and pushes in on big moments. If frames run long the picture is drawn at a lower resolution.
+
+Not carried over from the 2D picture: the cloth simulation of the nets (they shake instead), afterimages behind fast moves, punch and kick smears, sweat drops, and the fuse ring round a bomb ball (it flashes instead). Rain, low-gravity dust and wind streaks are still drawn flat over the picture.
 
 ## Dev pages
 
